@@ -117,13 +117,17 @@ def _rules(summary: dict[str, Any]) -> dict[str, Any]:
     hot = [m for m in ms if m["max_abs_z"] >= 2.5]
 
     direction = "上升" if top["delta"] >= 0 else "下降"
-    headline = f"{top['label']}本周期{direction} {abs(top['delta']):.1f} {top['unit']}".strip()
+    # 变化量小于 1 时用百分比说，别出现"上升 0.0 次"
+    if abs(top["delta"]) < 1:
+        headline = f"{top['label']}本周期变化 {top['pct']:+.1f}%"
+    else:
+        headline = f"{top['label']}本周期{direction} {abs(top['delta']):.1f} {top['unit']}".strip()
 
     parts = [
         f"过去 {summary['from']} 至 {summary['to']}，共 {summary['devices']} 台设备上报了 "
-        f"{sum(m['points'] for m in ms)} 个设备日聚合，覆盖 {len(ms)} 个指标。",
-        f"{top['label']}的日均值从周期前段的基线变化 {top['delta']:+.1f} {top['unit']}"
-        f"（{top['pct']:+.1f}%），峰值偏离 {top['max_abs_z']:.1f}σ，"
+        f"{sum(m['points'] for m in ms)} 个指标日聚合，覆盖 {len(ms)} 个指标。",
+        f"{top['label']}的日均值从周期前段的基线变化 "
+        f"{top['delta']:+.2f} {top['unit']}（{top['pct']:+.1f}%），峰值偏离 {top['max_abs_z']:.1f}σ，"
         f"是这一周期最值得看的一项。",
     ]
     if second:

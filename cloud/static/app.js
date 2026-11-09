@@ -430,11 +430,22 @@ async function viewDevice(id) {
 
 /* ---------------------------------------------------------------- 对比 */
 
-let compareMetric = "env.temp";
+let compareMetric = null;   // 首次进入时从 /meta 取，不写死指标名
 
 async function viewCompare() {
   main.innerHTML = `<div class="title-row"><div><h1>对比</h1><p class="sub">读取中…</p></div></div>`;
   await ensureMeta().catch(() => {});
+  // 指标来自云端实际收到的数据；上次选的没了就退回第一个
+  if (!compareMetric || !(META?.metrics || []).some((m) => m.key === compareMetric)) {
+    // 默认选覆盖面最广的指标，不然常常只有一条边有数据
+    compareMetric = (META?.metrics || [])
+      .slice().sort((a, b) => (b.devices || 0) - (a.devices || 0))[0]?.key;
+  }
+  if (!compareMetric) {
+    main.innerHTML = `<div class="title-row"><div><h1>对比</h1>
+      <p class="sub">还没有任何指标入库。</p></div></div>`;
+    return;
+  }
 
   let data;
   try {
