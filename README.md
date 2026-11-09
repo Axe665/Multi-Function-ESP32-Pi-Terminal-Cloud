@@ -121,8 +121,8 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**22 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
-公有 API 的成功/失败/超额三条路径。
+**25 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
+公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period。
 
 ## 与架构文档 v2.2 的逐条对照
 
@@ -141,8 +141,8 @@ python3 -m unittest discover -s tests -t . -v
 
 | 方案里的东西 | 现状 |
 |---|---|
-
-| 备份落外接 USB 盘 | 路径可配（`CLOUD_BACKUP_HOST_DIR`），默认落在仓库的 `backups/`；换盘只改环境变量 |
+| GPU（P104 / CUDA） | 本机没有 NVIDIA 显卡，`nvidia-smi` 不存在；本地模型路径用桩服务验证了请求与 JSON 契约，CUDA offload 与 7B 延迟未实测 |
+| 备份落外接 USB 盘 | 路径可配（`CLOUD_BACKUP_HOST_DIR`）；已用独立目录模拟外接盘跑通备份与恢复演练，插真盘只改环境变量 |
 | 每周副本的异地存放 | 加密副本已做（gpg AES256），但"拷到另一块盘"属于运维动作，代码只负责生成 |
 | 多租户 | 明确不做（方案里也不在范围） |
 

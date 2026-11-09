@@ -328,6 +328,7 @@ def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
             data.setdefault("scope_id", summary["scope_id"])
             data.setdefault("period", {"from": summary["from"], "to": summary["to"]})
             data.setdefault("confidence", "high")
+            data.setdefault("task", summary.get("task", "weekly_narrative"))
             usage = payload.get("usage") or {}
             store.bump("api_tokens", int(usage.get("total_tokens", 0)))
             return data
@@ -355,7 +356,7 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
             data.setdefault("scope_id", summary["scope_id"])
             data.setdefault("period", {"from": summary["from"], "to": summary["to"]})
             data.setdefault("confidence", "high")
-            data.setdefault("task", task)
+            data.setdefault("task", summary.get("task", "weekly_narrative"))
             return data
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             if attempt == 2:

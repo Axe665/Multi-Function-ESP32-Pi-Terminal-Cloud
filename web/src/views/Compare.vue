@@ -85,7 +85,7 @@ const rows = computed(() => {
   <section class="md-card">
     <div class="section-head">
       <h2>跨边走势</h2>
-      <span class="md-muted">{{ data?.metric }} · {{ (data?.days || []).length }} 天</span>
+      <span class="md-muted">{{ data?.metric }}，{{ (data?.days || []).length }} 天</span>
     </div>
     <ChartBox :option="option" height="320px" />
   </section>

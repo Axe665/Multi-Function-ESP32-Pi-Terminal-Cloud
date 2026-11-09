@@ -136,8 +136,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       <template v-if="detail">
         <div class="ai-head">
           <span class="md-muted small">
-            {{ scopeLabel[detail.scope] || detail.scope }} · {{ detail.model }} ·
-            {{ fmtDay(detail.content.period.from) }} – {{ fmtDay(detail.content.period.to) }}
+            {{ scopeLabel[detail.scope] || detail.scope }}，{{ detail.model }} {{ fmtDay(detail.content.period.from) }} – {{ fmtDay(detail.content.period.to) }}
           </span>
           <button class="md-btn md-btn--text" :disabled="busy" @click="regenerate">按原区间重新生成</button>
           <span class="md-chip" :class="detail.content.confidence === 'high' ? 'md-chip--ok' : 'md-chip--warn'">
@@ -161,7 +160,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
           <li v-for="(a, i) in detail.content.actions || []" :key="i">{{ a }}</li>
         </ul>
         <p class="md-muted small foot">
-          prompt {{ detail.prompt_hash }} · {{ detail.model }} · {{ fmtDay(detail.period_start) }}
+          prompt {{ detail.prompt_hash }}，{{ detail.model }}，{{ fmtDay(detail.period_start) }}
         </p>
       </template>
       <p v-else class="md-muted">选一份报告看详情。</p>

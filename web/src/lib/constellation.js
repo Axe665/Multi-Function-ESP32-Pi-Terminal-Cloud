@@ -21,7 +21,7 @@ void main() {
   float depth = clamp(1.0 - (-view.z - 2.2) / 5.0, 0.0, 1.0);
   gl_PointSize = aSize * (0.75 + 0.6 * depth) * (1.0 + 0.04 * sin(uTime * 2.0 + aPos.x * 4.0));
   vColor = aColor;
-  vAlpha = 0.35 + 0.65 * depth;
+  vAlpha = 0.58 + 0.42 * depth;
 }`;
 
 const FS = `#version 300 es
@@ -52,18 +52,18 @@ void main() {
   float depth = clamp(1.0 - (-view.z - 2.2) / 5.0, 0.0, 1.0);
   // 数据沿链路流动：靠近 0 的那端更亮
   float pulse = 0.55 + 0.45 * sin(uTime * 1.6 + aPos.x * 3.0 + aPos.z * 2.0);
-  vAlpha = aFade * (0.18 + 0.5 * depth) * pulse;
+  vAlpha = aFade * (0.62 + 0.38 * depth) * (0.75 + 0.25 * pulse);
 }`;
 
 const LINE_FS = `#version 300 es
 precision highp float;
 in float vAlpha;
 out vec4 outColor;
-void main() { outColor = vec4(0.078, 0.412, 0.353, vAlpha); }`;
+void main() { outColor = vec4(0.58, 0.98, 0.72, vAlpha); }`;
 
-const TEAL = [0.078, 0.412, 0.353];
-const INK = [0.071, 0.086, 0.102];
-const GREY = [0.48, 0.54, 0.51];
+const TEAL = [0.52, 0.86, 0.62];
+const INK = [0.92, 0.96, 0.88];
+const GREY = [0.62, 0.68, 0.63];
 
 export function createConstellation(canvas) {
   const gl = canvas.getContext("webgl2", { antialias: true, alpha: true, premultipliedAlpha: false });
@@ -113,12 +113,15 @@ export function createConstellation(canvas) {
       nodes.size.push(s);
     };
     const link = (a, b, fade) => {
-      links.pos.push(a[0], a[1], a[2], b[0], b[1], b[2]);
-      links.fade.push(fade, fade);
+      // WebGL 的 lineWidth 不可靠：用三条轻微错位的线伪装成 2px 粗细
+      for (const dy of [-0.014, 0, 0.014]) {
+        links.pos.push(a[0], a[1] + dy, a[2], b[0], b[1] + dy, b[2]);
+        links.fade.push(dy ? fade * 0.5 : fade, dy ? fade * 0.5 : fade);
+      }
     };
 
     const center = [0, 0, 0];
-    push(center, INK, 11);
+    push(center, INK, 30);
 
     const n = Math.max(1, edges.length);
     edges.forEach((e, i) => {
@@ -126,7 +129,7 @@ export function createConstellation(canvas) {
       const r = n === 1 ? 0 : 1.15;
       // 三个边放在不同高度，投影后才有纵深，不会压成一条横线
       const hub = [Math.cos(ang) * r, Math.sin(ang) * 0.62, Math.sin(ang) * r * 0.85];
-      push(hub, e.online === false ? GREY : TEAL, 7.5);
+      push(hub, e.online === false ? GREY : TEAL, 22);
       link(center, hub, 0.9);
 
       const k = Math.max(1, e.devices || 1);
@@ -137,13 +140,13 @@ export function createConstellation(canvas) {
           hub[1] + Math.sin(a2 * 1.3) * 0.34,
           hub[2] + Math.sin(a2) * 0.40,
         ];
-        push(sat, GREY, 4.2);
+        push(sat, GREY, 14);
         link(hub, sat, 0.5);
       }
     });
 
     // 只有真实有告警时才让环更亮，避免"一直很兴奋"
-    nodes.size[0] = 9 + Math.min(6, alerts * 0.3);
+    nodes.size[0] = 13 + Math.min(6, alerts * 0.3);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, nodeBufs.pos);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(nodes.pos), gl.DYNAMIC_DRAW);
@@ -175,7 +178,7 @@ export function createConstellation(canvas) {
 
   const view = lookAt([0, 1.1, 4.1], [0, 0, 0], [0, 1, 0]);
   const fitProj = (a) => {
-    const d = 4.1, W = 3.9, H = 2.4;
+    const d = 4.1, W = 3.1, H = 1.9;
     const visH = Math.max(H, W / a);
     return perspective(2 * Math.atan(visH / 2 / d), a, 0.1, 20);
   };

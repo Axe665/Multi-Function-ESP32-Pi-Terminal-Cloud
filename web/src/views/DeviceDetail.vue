@@ -101,10 +101,10 @@ const wordOption = computed(() => ({
   tooltip: { formatter: (p) => `${p.name}：${p.value}` },
   series: [{
     type: 'wordCloud', shape: 'square', left: 0, top: 0, right: 0, bottom: 0,
-    sizeRange: [13, 30], rotationRange: [0, 0],
+    sizeRange: [14, 40], rotationRange: [0, 0],
     textStyle: {
       fontFamily: 'Roboto, Noto Sans SC, sans-serif',
-      color: () => `hsl(${105 + Math.random() * 40}, ${25 + Math.random() * 20}%, ${28 + Math.random() * 22}%)`,
+      color: () => `hsl(${112 + Math.random() * 34}, ${38 + Math.random() * 18}%, ${24 + Math.random() * 12}%)`,
     },
     data: words.value.slice(0, 40).map((w) => ({ name: w.word, value: w.count })),
   }],
@@ -114,7 +114,7 @@ const wordOption = computed(() => ({
 <template>
   <PageHeader
     :title="device ? device.device_id : '设备'"
-    :sub="device ? `${device.edge_id} · ${device.scene || '—'} · 在线 ${device.online ? '是' : '否'}` : ''"
+    :sub="device ? `${device.edge_id}，${device.scene || '—'}，在线：${device.online ? '是' : '否'}` : ''"
   >
     <RouterLink class="md-btn md-btn--text" to="/edges">返回边与设备</RouterLink>
   </PageHeader>
@@ -144,7 +144,7 @@ const wordOption = computed(() => ({
       <section class="md-card">
         <div class="section-head">
           <h2>词云</h2>
-          <span class="md-muted">该边的建议用词 · 最近 7 天</span>
+          <span class="md-muted">该边的建议用词，最近 7 天</span>
         </div>
         <ChartBox :option="wordOption" height="280px" />
       </section>
@@ -160,7 +160,7 @@ const wordOption = computed(() => ({
           <span class="md-chip" :class="a.risk === 'alert' ? 'md-chip--alert' : 'md-chip--warn'">{{ a.risk }}</span>
           <div class="md-grow">
             <div>{{ a.text }}</div>
-            <div class="md-muted small">{{ fmtTime(a.created_at) }} · {{ a.source }}</div>
+            <div class="md-muted small">{{ fmtTime(a.created_at) }}，{{ a.source }}</div>
           </div>
         </div>
         <p v-if="!advice.length" class="md-muted">这台设备最近没有建议。</p>

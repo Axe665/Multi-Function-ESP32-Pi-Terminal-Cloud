@@ -50,7 +50,7 @@ const kpis = computed(() => {
 <template>
   <PageHeader
     title="总览"
-    :sub="`${o?.edges_total || 0} 个边 · ${o?.devices_total || 0} 台设备 · 最近 7 天上报完整率 ${fmtNum(o?.completeness_7d, 1)}% · 只接收 k≥5 的日聚合`"
+    :sub="`${o?.edges_total || 0} 个边，${o?.devices_total || 0} 台设备，最近 7 天上报完整率 ${fmtNum(o?.completeness_7d, 1)}%，只接收 k≥5 的日聚合`"
   >
     <span class="md-chip">{{ o?.ai_mode === 'api' ? '公有 API' : '本地模型' }}</span>
     <RouterLink class="md-btn" to="/reports">生成 AI 报告</RouterLink>
@@ -62,9 +62,16 @@ const kpis = computed(() => {
   <section class="md-card">
     <div class="section-head">
       <h2>全网拓扑</h2>
-      <span class="md-muted">本机在中心 · 每条连线是一份 edge-report 的来路</span>
+      <span class="md-muted">本机在中心，每条连线是一份 edge-report 的来路</span>
     </div>
     <canvas ref="canvas" class="topology"></canvas>
+    <div class="topo-legend" aria-hidden="true">
+      <span><i class="lg lg--center"></i>本机</span>
+      <span><i class="lg lg--edge"></i>在线边</span>
+      <span><i class="lg lg--sat"></i>设备</span>
+      <span><i class="lg lg--off"></i>离线</span>
+      <span class="topo-note">连线明暗 = 上报脉冲</span>
+    </div>
     <div class="topo-list">
       <div v-for="e in o?.edges || []" :key="e.edge_id" class="md-list-row">
         <span class="dot" :class="e.online_devices ? 'dot--on' : ''"></span>
@@ -84,7 +91,7 @@ const kpis = computed(() => {
         <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
       </div>
       <template v-if="latest">
-        <p class="md-muted small">{{ latest.period_start }} – {{ latest.period_end }} · {{ latest.model }}</p>
+        <p class="md-muted small">{{ latest.period_start }} – {{ latest.period_end }}，{{ latest.model }}</p>
         <h3 class="headline">{{ latest.content.headline }}</h3>
         <p class="narrative">{{ latest.content.narrative }}</p>
         <ul class="actions">
@@ -104,7 +111,7 @@ const kpis = computed(() => {
         <div v-for="(a, i) in o?.alerts_top || []" :key="i" class="md-list-row">
           <div class="md-grow">
             <div>{{ a.text }}</div>
-            <div class="md-muted small">{{ a.edge }} · {{ a.device }}</div>
+            <div class="md-muted small">{{ a.edge }}，{{ a.device }}</div>
           </div>
           <span class="md-chip" :class="a.risk === 'alert' ? 'md-chip--alert' : 'md-chip--warn'">{{ a.count }}</span>
         </div>
@@ -138,11 +145,36 @@ const kpis = computed(() => {
   gap: 0 var(--space-4); margin-top: var(--space-2);
 }
 .topology {
-  width: 100%; height: 300px; display: block;
+  width: 100%; height: 340px; display: block;
   border-radius: var(--md-shape-sm);
   /* 星座图是加色混合，配反色底 */
   background: var(--md-inverse-surface);
 }
+.topo-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+  font: var(--md-label-medium);
+  color: var(--md-on-surface-variant);
+  flex-wrap: wrap;
+}
+.topo-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.lg--center { background: #ebf5e4; }
+.lg--edge { background: #85db9e; }
+.lg--sat { background: #9eada1; }
+.lg--off { background: #4a514c; }
+.topo-note { margin-left: auto; }
 .trio {
   display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.9fr);
   gap: var(--space-4); margin-top: var(--space-4); align-items: start;
