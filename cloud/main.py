@@ -34,7 +34,8 @@ def create_app() -> FastAPI:
                   description=DESCRIPTION, docs_url="/api/docs", redoc_url=None,
                   lifespan=lifespan)
     app.include_router(api.router)
-    app.mount("/", StaticFiles(directory=config.STATIC, html=True), name="static")
+    if config.STATIC.is_dir():
+        app.mount("/", StaticFiles(directory=config.STATIC, html=True), name="static")
     return app
 
 

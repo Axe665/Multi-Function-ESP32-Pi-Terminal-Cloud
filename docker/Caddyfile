@@ -1,6 +1,16 @@
 # 两个监听：
 #   443 —— 管理台与内网 API，cloud-ca 签发的站点证书
 #   8443 —— 只给边上报用，强制客户端证书（文档 §5.8 的 mTLS）
+# 本机明文入口：只绑 127.0.0.1，给本机调试和截图用（公网仍然只有 443/8443）
+http://:8088 {
+	handle /api/* {
+		reverse_proxy api:8002
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}
+
 {$CLOUD_DOMAIN:localhost} {
 	tls /certs/cloud.crt /certs/cloud.key
 

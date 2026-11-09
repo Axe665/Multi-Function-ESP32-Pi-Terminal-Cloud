@@ -7,6 +7,8 @@
 
 ## 每个页面回答一个问题
 
+前端与边仓同一套：Vue 3 + Vite + ECharts，自写 Material 3 token，亮色默认可切暗色。
+
 | 页面 | 它回答的问题 | 关键内容 |
 |---|---|---|
 | 总览 | 这一周三条边都健康吗？ | WebGL 三维拓扑、在线数、设备日完整率、本周 AI 摘要、告警 Top5 |
@@ -23,6 +25,12 @@ python3 -m pip install -r requirements.txt
 docker compose -f docker/compose.yml up -d postgres redis
 ./run.sh                       # 首次自动写入 3 个边 × 3 台设备 × 14 天演示数据
 # http://127.0.0.1:8002
+```
+
+前端（Vue 3 + Vite + ECharts，手写 Material 3 token）：
+
+```bash
+cd web && npm install && npm run dev     # http://127.0.0.1:5173，/api 代理到 https://localhost
 ```
 
 整套（caddy + web + api + worker + postgres + redis + ollama）：

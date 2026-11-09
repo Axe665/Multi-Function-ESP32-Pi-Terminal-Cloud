@@ -31,6 +31,7 @@ services:
       - "443:443"
       - "80:80"
       - "8443:8443"   # 边 → 云的 mTLS 入口
+      - "127.0.0.1:8088:8088"   # 本机明文入口，调试与截图用
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
@@ -42,12 +43,15 @@ services:
 
   # 静态前端（构建产物由镜像里的 web 服务提供）
   web:
-    image: caddy:2-alpine
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    image: modular-terminal-cloud-web:2.0.0
     container_name: mt-cloud-web
     restart: unless-stopped
-    volumes:
-      - ../cloud/static:/srv/web:ro
-      - ./Caddyfile.web:/etc/caddy/Caddyfile:ro
     deploy:
       resources:
         limits:
