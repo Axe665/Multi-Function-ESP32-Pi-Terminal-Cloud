@@ -30,8 +30,10 @@ services:
     ports:
       - "443:443"
       - "80:80"
+      - "8443:8443"   # 边 → 云的 mTLS 入口
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -150,3 +152,7 @@ volumes:
   caddy_data:
   caddy_config:
   ollama_models:
+
+networks:
+  default:
+    name: mt-backbone

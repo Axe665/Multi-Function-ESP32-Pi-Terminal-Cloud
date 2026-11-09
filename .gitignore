@@ -3,3 +3,6 @@ __pycache__/
 data/
 .env
 .taste-skill/
+
+docker/certs/
+docker/cloud-certs/
