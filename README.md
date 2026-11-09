@@ -129,7 +129,7 @@ python3 -m unittest discover -s tests -t . -v
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama | ✅ `docker/compose.yml` 七个服务；主库 Postgres 16，队列 Redis 7 + RQ，worker 跑 AI 报告/词频/跨边聚合 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败落规则模板 | ✅ 四种任务（weekly_narrative / fleet_compare / advice_digest / wordcloud_label）都有规则实现，JSON 不过关就退回模板 |
-| §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计 |
+| §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现，另加 meta/compare/daily/auth |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），`CLOUD_BACKUP_DIR` 指到外接盘，保留 14 天 |
