@@ -9,7 +9,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
 # pg_dump 给 worker 的每日备份用；api 用不到但不值得为它多打一个镜像
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client \
+ && apt-get install -y --no-install-recommends postgresql-client gnupg \
  && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --index-url ${PIP_INDEX_URL} -r requirements.txt

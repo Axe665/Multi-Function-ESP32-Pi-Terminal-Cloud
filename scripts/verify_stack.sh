@@ -51,5 +51,10 @@ docker compose -f docker/compose.yml exec -T worker python -c \
   'from cloud import jobs; print(jobs.run_backup())' 2>/dev/null | grep -q "'ok': True" \
   && ok "pg_dump 备份成功" || bad "备份失败"
 
+echo "== 恢复演练 =="
+docker compose -f docker/compose.yml exec -T worker python -c \
+  'from cloud import jobs; print(jobs.run_restore_drill())' 2>/dev/null | grep -q "'ok': True" \
+  && ok "最新备份能恢复到临时库且行数对得上" || bad "恢复演练失败"
+
 echo
 [ "$fail" = "0" ] && echo "VERIFY: 全部通过" || { echo "VERIFY: 有失败项"; exit 1; }

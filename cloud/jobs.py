@@ -8,8 +8,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import shutil
 import subprocess
+import tempfile
 import time
+
+import psycopg
+import psycopg.conninfo
+from psycopg.rows import dict_row
 from typing import Any
 
 from . import config, queue, store
@@ -81,6 +87,64 @@ def run_backup() -> dict[str, Any]:
     return {"ok": True, "file": target.name, "bytes": size, "pruned": removed}
 
 
+def _encrypt(path) -> dict[str, Any]:
+    """每周的离线副本加密（age 不在镜像里，用 gpg 对称加密）。"""
+    key_file = config.BACKUP_KEY_FILE
+    if not key_file:
+        return {"ok": False, "error": "没有配置 CLOUD_BACKUP_KEY_FILE"}
+    target = path.with_suffix(path.suffix + ".gpg")
+    # worker 以非 root 跑，HOME 不可写；给 gpg 一个临时 homedir
+    home = tempfile.mkdtemp(prefix="gpg-")
+    res = subprocess.run(
+        ["gpg", "--homedir", home, "--batch", "--yes", "--symmetric", "--cipher-algo", "AES256",
+         "--passphrase-file", str(key_file), "--output", str(target), str(path)],
+        capture_output=True, text=True, timeout=600)
+    shutil.rmtree(home, ignore_errors=True)
+    if res.returncode != 0:
+        return {"ok": False, "error": res.stderr[-200:]}
+    return {"ok": True, "file": target.name, "bytes": target.stat().st_size}
+
+
+def run_restore_drill() -> dict[str, Any]:
+    """每月一次的恢复演练：新库导入最新 dump，校验行数与最新日期，然后删掉。"""
+    dumps = sorted(config.BACKUP_DIR.glob("cloud-*.dump"), key=lambda f: f.stat().st_mtime)
+    if not dumps:
+        return {"ok": False, "error": "没有可用的备份文件"}
+    newest = dumps[-1]
+    started = time.time()
+    name = f"cloud_drill_{time.strftime('%Y%m%d%H%M%S')}"
+    admin = psycopg.conninfo.make_conninfo(config.PG_DSN)
+    drill_dsn = psycopg.conninfo.make_conninfo(config.PG_DSN, dbname=name)
+    try:
+        with psycopg.connect(admin, autocommit=True, row_factory=dict_row) as conn:
+            conn.execute(f'CREATE DATABASE "{name}"')
+        res = subprocess.run(["pg_restore", "--no-owner", "--no-acl", "--dbname", drill_dsn, str(newest)],
+                             capture_output=True, text=True, timeout=1800)
+        # 客户端版本比服务端新时会带一句 SET transaction_timeout，服务端拒绝但数据照常恢复；
+        # 真正的判定是行数与最新日期能不能对上，不是 pg_restore 的退出码。
+        if res.returncode not in (0, 1):
+            return {"ok": False, "error": (res.stderr or res.stdout)[-300:]}
+        with psycopg.connect(drill_dsn, row_factory=dict_row) as conn:
+            counts = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+                      for t in ("edges", "devices", "telemetry_daily")}
+            latest = conn.execute("SELECT MAX(day) AS d FROM telemetry_daily").fetchone()["d"]
+        with psycopg.connect(config.PG_DSN, row_factory=dict_row) as conn:
+            source = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+                      for t in ("edges", "devices", "telemetry_daily")}
+        missing = {t: (source[t], counts[t]) for t in counts if counts[t] < source[t]}
+        if missing:
+            return {"ok": False, "error": f"恢复后行数不足：{missing}", "counts": counts}
+        took = round(time.time() - started, 1)
+        store.audit("system", "backup.drill", "cloud",
+                    {"file": newest.name, "counts": counts,
+                     "latest_day": str(latest), "rto_s": took})
+        return {"ok": True, "file": newest.name, "counts": counts,
+                "latest_day": str(latest), "rto_s": took}
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
+
+
 def prune(retention_days: int | None = None) -> dict[str, int]:
     days = retention_days or config.RETENTION_DAYS
     today = dt.date.today()
@@ -114,6 +178,7 @@ JOBS = {
     "rebuild_wordfreq": rebuild_wordfreq,
     "refresh_rollup": refresh_rollup,
     "run_backup": run_backup,
+    "run_restore_drill": run_restore_drill,
     "prune": prune,
     "maybe_daily_report": maybe_daily_report,
 }

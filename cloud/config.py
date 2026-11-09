@@ -15,6 +15,8 @@ def _env(key: str, default: str = "") -> str:
 
 DATA_DIR = Path(_env("CLOUD_DATA_DIR", str(ROOT / "data")))
 BACKUP_DIR = Path(_env("CLOUD_BACKUP_DIR", str(ROOT / "backups")))
+# 每周离线副本的对称加密口令文件（gpg --passphrase-file）
+BACKUP_KEY_FILE = Path(_env("CLOUD_BACKUP_KEY_FILE", "")) if _env("CLOUD_BACKUP_KEY_FILE") else None
 
 # 主库：Postgres 16（文档 §6.2 的 DDL 直接可用）
 PG_DSN = _env("CLOUD_PG_DSN", "postgresql://cloud:cloud@127.0.0.1:5432/cloud")

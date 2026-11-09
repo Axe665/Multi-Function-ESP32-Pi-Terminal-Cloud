@@ -17,7 +17,7 @@ def _now() -> float:
 
 
 def _scheduler_loop() -> None:
-    last = {"rollup": 0.0, "words": 0.0, "report": 0.0, "prune": 0.0, "backup": 0.0}
+    last = {"rollup": 0.0, "words": 0.0, "report": 0.0, "prune": 0.0, "backup": 0.0, "drill": 0.0}
     while True:
         try:
             now = _now()
@@ -33,7 +33,13 @@ def _scheduler_loop() -> None:
             today = dt.date.today()
             at_three = dt.datetime.combine(today, dt.time(3, 0)).timestamp()
             if now >= at_three and now - last["backup"] > 20 * 3600:
-                jobs.run_backup(); last["backup"] = now
+                out = jobs.run_backup()
+                # 文档 §6.7：每周再做一份加密离线副本；每月做一次恢复演练
+                if today.weekday() == 6:
+                    jobs._encrypt(config.BACKUP_DIR / out["file"]) if out.get("ok") else None
+                last["backup"] = now
+            if today.day == 1 and now - last["drill"] > 24 * 3600:
+                jobs.run_restore_drill(); last["drill"] = now
         except Exception as e:  # noqa: BLE001 —— 排期线程不能死
             store.audit("system", "worker.schedule_error", "cloud", {"error": str(e)[:200]})
         time.sleep(60)
