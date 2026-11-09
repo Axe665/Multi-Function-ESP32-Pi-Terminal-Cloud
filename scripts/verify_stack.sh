@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 fail=0
 ok()  { printf '  [OK]   %s\n' "$1"; }
 bad() { printf '  [FAIL] %s\n' "$1"; fail=1; }
-code() { curl -s -o /dev/null -w '%{http_code}' -m 10 "$@"; }
+BASE="${CLOUD_URL:-https://localhost}"
+code() { curl -sk -o /dev/null -w '%{http_code}' -m 10 "$@"; }
 
 echo "== 服务状态 =="
 for s in caddy web api worker postgres redis; do
@@ -19,10 +20,10 @@ pg_health="$(docker compose -f docker/compose.yml ps --format '{{.Service}} {{.H
 [ "$pg_health" = "healthy" ] && ok "postgres healthy" || bad "postgres ${pg_health:-no health}"
 
 echo "== 接口 =="
-[ "$(code http://127.0.0.1:8002/api/v1/health)" = "200" ] \
+[ "$(code $BASE/api/v1/health)" = "200" ] \
   && ok "health" || bad "health 不通"
 
-curl -s -m 10 http://127.0.0.1:8002/api/v1/health > /tmp/mt-health.json
+curl -sk -m 10 "$BASE/api/v1/health" > /tmp/mt-health.json
 python3 - <<'PY' && ok "队列有 worker" || bad "队列没有 worker"
 import json, sys
 h = json.load(open("/tmp/mt-health.json"))
@@ -35,13 +36,13 @@ h = json.load(open("/tmp/mt-health.json"))
 sys.exit(0 if h.get("db") == "ok" else 1)
 PY
 
-[ "$(code http://127.0.0.1:8002/api/v1/overview)" = "200" ] \
+[ "$(code $BASE/api/v1/overview)" = "200" ] \
   && ok "overview" || bad "overview 不通"
 
 echo "== AI 报告（走队列） =="
-report="$(curl -s -m 180 -X POST -H 'content-type: application/json' \
+report="$(curl -sk -m 180 -X POST -H 'content-type: application/json' \
   -d '{"scope":"fleet","task":"weekly_narrative","mode":"rules"}' \
-  http://127.0.0.1:8002/api/v1/ai/reports)"
+  $BASE/api/v1/ai/reports)"
 printf '%s' "$report" | grep -q '"headline"' \
   && ok "报告生成成功" || bad "报告生成失败：${report:0:120}"
 

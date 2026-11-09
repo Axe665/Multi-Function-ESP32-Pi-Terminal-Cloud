@@ -1,6 +1,7 @@
 # 公网只放行两条 API；管理台与 Ollama 只在内网。
 # 证书用 cloud-ca 签发（内网自签根），边的 mTLS 预置同一份根。
-{
+# 域名用 CLOUD_DOMAIN 指定；没配就是 localhost（自签根只签这个名）
+{$CLOUD_DOMAIN:localhost} {
 	# 边 → 云：唯一写入口
 	@ingest path /api/v1/ingest/edge-report
 	handle @ingest {

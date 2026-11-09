@@ -1,12 +1,14 @@
+name: modular-terminal-cloud
+
 # 云节点：caddy + web + api + worker + postgres + redis + ollama（文档 §6.1）
 # 数据卷：pgdata、caddy_data、backups、ollama_models
 x-cloud: &cloud
-  build: ..
   image: modular-terminal-cloud:2.0.0
   restart: unless-stopped
   environment: &cloud-env
     CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
     CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}
+    CLOUD_DOMAIN: ${CLOUD_DOMAIN:-localhost}
     CLOUD_PG_DSN: postgresql://cloud:${CLOUD_DB_PASSWORD:-cloud}@postgres:5432/cloud
     CLOUD_REDIS_URL: redis://redis:6379/0
     CLOUD_BACKUP_DIR: /backups
@@ -52,6 +54,12 @@ services:
   # 只接请求：查询、管理、摄取
   api:
     <<: *cloud
+    # 只在 api 上构建一次，worker 复用同一镜像（两个服务同时构建会撞标签）
+    build:
+      context: ..
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     container_name: mt-cloud-api
     command: ["python", "-m", "uvicorn", "cloud.main:app", "--host", "0.0.0.0", "--port", "8002"]
     depends_on:
@@ -80,8 +88,9 @@ services:
     # 镜像里的 HEALTHCHECK 是给 api 的，worker 不监听端口
     healthcheck:
       disable: true
+    # 备份目录是宿主目录，用当前用户跑，免得 uid 10001 写不进去
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
-      - ../data:/app/data
       - ${CLOUD_BACKUP_HOST_DIR:-../backups}:/backups
     deploy:
       resources:
@@ -89,7 +98,7 @@ services:
           memory: 1g
 
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: mt-cloud-db
     restart: unless-stopped
     environment:
@@ -122,6 +131,9 @@ services:
 
   # 本地模型（模式 B）。没 GPU 会很慢，CLOUD_AI_MODE=rules 可跳过
   ollama:
+    # 可选：默认不启动，拉 1.5GB 模型没必要。要本地模型时
+    # docker compose --profile ai up -d ollama && docker compose exec ollama ollama pull qwen2.5:7b
+    profiles: ["ai"]
     image: ollama/ollama:latest
     container_name: mt-ollama
     restart: unless-stopped
