@@ -534,6 +534,8 @@ async function viewReports() {
   }
 
   const scopeLabel = { fleet: "全网", edge: "单边", device: "单设备" };
+  const taskLabel = { weekly_narrative: "趋势解读", fleet_compare: "跨边对比",
+                      advice_digest: "本周三件事", wordcloud_label: "词云主题" };
 
   main.innerHTML = `
     <div class="title-row">
@@ -543,6 +545,12 @@ async function viewReports() {
         <select class="control" id="gen-scope" aria-label="报告范围">
           <option value="fleet">全网</option>
           <option value="edge">单边</option>
+        </select>
+        <select class="control" id="gen-task" aria-label="报告类型">
+          <option value="weekly_narrative">趋势解读</option>
+          <option value="fleet_compare">跨边对比</option>
+          <option value="advice_digest">本周三件事</option>
+          <option value="wordcloud_label">词云主题</option>
         </select>
         <button class="btn btn-primary" id="gen">生成报告</button>
       </div>
@@ -555,7 +563,8 @@ async function viewReports() {
           <thead><tr><th>范围</th><th>周期</th><th>模型</th><th class="num">token</th></tr></thead>
           <tbody>${list.map((r) => `<tr data-report="${r.id}" ${r.id === active ? 'style="background:var(--raised)"' : ""}>
             <td><strong>${scopeLabel[r.scope] || r.scope}</strong>
-              <div class="mono">${esc(r.scope_id || "全部")}</div></td>
+              <div class="mono">${esc(r.scope_id || "全部")}</div>
+              <div class="row-sub">${esc(taskLabel[r.task] || "趋势解读")}</div></td>
             <td>${fmtDay(r.period_start)} – ${fmtDay(r.period_end)}</td>
             <td class="muted">${esc(r.model)}</td>
             <td class="num">${r.model === "rules-v1" ? "—" : `${fmtNum(r.tokens_in)} / ${fmtNum(r.tokens_out)}`}</td>
@@ -598,7 +607,7 @@ async function viewReports() {
 
   document.getElementById("gen").onclick = async (ev) => {
     const scope = document.getElementById("gen-scope").value;
-    const body = { scope };
+    const body = { scope, task: document.getElementById("gen-task").value };
     if (scope === "edge") {
       const edges = await api("/api/v1/edges").catch(() => []);
       if (!edges.length) { toast("还没有边节点"); return; }

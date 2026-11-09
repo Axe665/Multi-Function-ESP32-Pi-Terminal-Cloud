@@ -323,7 +323,9 @@ def reports(limit: int = 30) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             "SELECT id, scope, scope_id, period_start, period_end, model, prompt_hash,"
-            " tokens_in, tokens_out, created_at FROM ai_reports ORDER BY created_at DESC LIMIT ?",
+            " tokens_in, tokens_out, created_at,"
+            " COALESCE(json_extract(content,'$.task'),'weekly_narrative') AS task"
+            " FROM ai_reports ORDER BY created_at DESC LIMIT ?",
             (limit,)).fetchall()
     return [dict(r) for r in rows]
 
