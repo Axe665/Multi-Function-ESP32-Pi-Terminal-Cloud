@@ -661,6 +661,7 @@ async function viewPrivacy() {
 
 const routes = [
   [/^#\/$/, viewOverview, "overview"],
+  [/^#\/overview$/, viewOverview, "overview"],
   [/^#\/edges$/, viewEdges, "edges"],
   [/^#\/edges\/(.+)$/, (m) => viewEdge(decodeURIComponent(m[1])), "edges"],
   [/^#\/devices\/(.+)$/, (m) => viewDevice(decodeURIComponent(m[1])), "edges"],
