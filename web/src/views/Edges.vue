@@ -29,7 +29,6 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
     title="边与设备"
     :sub="`${edges.length} 个边，${devices.length} 台设备。选择边可筛选设备，选择设备查看趋势。`"
   >
-    <span class="md-chip">{{ devices.filter((d) => d.online).length }} 台在线</span>
     <button v-if="activeEdge" class="md-btn md-btn--text" @click="activeEdge = ''">显示全部边</button>
   </PageHeader>
 
@@ -42,17 +41,16 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
     </div>
     <table class="md-table">
       <thead>
-        <tr><th>边</th><th class="num">设备</th><th class="num">在线</th><th class="num">有数据天数</th><th class="num">最小 k</th><th class="num">指标数</th></tr>
+        <tr><th>边</th><th class="num">在线设备</th><th class="num">有数据天数</th><th class="num">最小 k</th><th class="num">指标数</th></tr>
       </thead>
       <tbody>
         <tr v-for="e in edges" :key="e.edge_id" class="row-click" :class="{ 'row--active': activeEdge === e.edge_id }"
             tabindex="0" @click="activeEdge = e.edge_id" @keydown.enter="activeEdge = e.edge_id">
-          <td>
+          <td class="edge-cell">
             <strong>{{ e.name }}</strong>
-            <div class="md-mono md-muted">{{ e.edge_id }}</div>
+            <span class="md-mono md-muted">{{ e.edge_id }}</span>
           </td>
-          <td class="num">{{ e.devices }}</td>
-          <td class="num">{{ e.online_devices }}</td>
+          <td class="num">{{ e.online_devices }}<span class="md-muted"> / {{ e.devices }}</span></td>
           <td class="num">{{ e.days }}<span class="md-muted"> / 7</span></td>
           <td class="num">{{ e.k_min }}</td>
           <td class="num">{{ e.metrics.length }}</td>
@@ -76,8 +74,8 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
           <td>{{ nameOf(d.edge_id) }}</td>
           <td>{{ d.scene || '—' }}</td>
           <td>
-            <span class="md-chip" :class="d.online ? 'md-chip--ok' : 'md-chip--warn'">
-              {{ d.online ? '在线' : '离线' }}
+            <span class="sev" :class="d.online ? 'sev--ok' : ''">
+              <span class="sev-dot"></span>{{ d.online ? '在线' : '离线' }}
             </span>
           </td>
           <td class="num">{{ d.days }}<span class="md-muted"> / 7</span></td>
@@ -94,6 +92,8 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
 .error { color: var(--md-error); margin-bottom: var(--space-3); }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
 .devices { margin-top: var(--space-4); }
+.edge-cell { white-space: nowrap; }
+.edge-cell .md-mono { margin-left: var(--space-2); }
 .row-click { cursor: pointer; }
 .row--active { background: var(--md-secondary-container); }
 .small { font: var(--md-body-small); }

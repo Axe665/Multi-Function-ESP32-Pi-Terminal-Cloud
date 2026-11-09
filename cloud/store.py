@@ -98,6 +98,15 @@ CREATE TABLE IF NOT EXISTS audit (
   created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS alert_state (
+  alert_key   TEXT PRIMARY KEY,
+  acked_at    TIMESTAMPTZ,
+  acked_by    TEXT,
+  muted_until TIMESTAMPTZ,
+  mute_reason TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL
+);
+
 -- 文档之外的两张辅助表：幂等收件箱与计数器
 CREATE TABLE IF NOT EXISTS reports (
   edge_id     TEXT NOT NULL,
@@ -341,6 +350,150 @@ def advice(edge_id: str | None = None, risk: str | None = None,
     args.append(limit)
     with connect() as conn:
         return [_row(r) for r in conn.execute(sql, args)]
+
+
+# ---------------------------------------------------------------- 告警
+
+ANOMALY_Z = 2.0
+SEVERE_Z = 2.5
+DAY_MS = 86_400_000
+
+
+def _day_no(day: Any) -> int:
+    """_plain 把 date 还原成 ISO 字符串，这里两种都接。"""
+    if isinstance(day, str):
+        day = dt.date.fromisoformat(day[:10])
+    return (day - dt.date(1970, 1, 1)).days
+
+
+def _states() -> dict[str, dict[str, Any]]:
+    with connect() as conn:
+        return {r["alert_key"]: _row(r) for r in conn.execute("SELECT * FROM alert_state")}
+
+
+def alert_feed(days: int = 30, stale_ms: int = 2 * 3600_000,
+               at: int | None = None) -> list[dict[str, Any]]:
+    """云端告警走日聚合的 z：一条 = 一段连续越界的日子。
+
+    与边仓同一套判定（单日 |z|≥2 注意，连续两日 |z|≥2.5 严重），
+    只是窗口从 5 分钟换成 1 天。已恢复由后续正常日推出，不落库。
+    """
+    now = at if at is not None else now_ms()
+    since = (dt.date.today() - dt.timedelta(days=max(1, days))).isoformat()
+    with connect() as conn:
+        rows = [_row(r) for r in conn.execute(
+            """SELECT * FROM telemetry_daily WHERE day>=%s
+               ORDER BY device_id, metric, day""", (since,))]
+
+    runs: list[dict[str, Any]] = []
+    cur: dict[str, Any] | None = None
+    for r in rows:
+        key = (r["device_id"], r["metric"])
+        z = abs(r["z"] or 0)
+        if z < ANOMALY_Z:
+            if cur is not None and (cur["device_id"], cur["metric"]) == key:
+                cur["resolved"] = True
+                cur = None
+            continue
+        contiguous = (cur is not None and (cur["device_id"], cur["metric"]) == key
+                      and _day_no(r["day"]) - _day_no(cur["day_to"]) == 1)
+        if contiguous:
+            cur["day_to"] = r["day"]
+            cur["windows"] += 1
+            cur["max_z"] = max(cur["max_z"], z)
+            if z >= SEVERE_Z:
+                if cur["_severe"] and _day_no(r["day"]) - _day_no(cur["_severe"]) == 1:
+                    cur["critical"] = True
+                cur["_severe"] = r["day"]
+        else:
+            if cur is not None and (cur["device_id"], cur["metric"]) == key:
+                cur["resolved"] = True
+            cur = {
+                "kind": "anomaly", "alert_key": f"anomaly:{r['device_id']}:{r['metric']}:{r['day']}",
+                "edge_id": r["edge_id"], "device_id": r["device_id"], "metric": r["metric"],
+                "day": r["day"], "day_to": r["day"], "mean": r["mean"], "z": r["z"],
+                "k": r["k"], "label": r["label"], "unit": r["unit"],
+                "windows": 1, "max_z": z, "critical": False, "resolved": False,
+                "_severe": r["day"] if z >= SEVERE_Z else None,
+            }
+            runs.append(cur)
+
+    for a in runs:
+        a.pop("_severe", None)
+
+    # 边掉线：2 小时没有上报，比数值漂移更需要处理
+    device_name = {d["device_id"]: d["device_id"] for d in devices()}
+    for e in edges():
+        last = e.get("last_seen") or 0
+        if now - last <= stale_ms:
+            continue
+        runs.append({
+            "kind": "stale", "alert_key": f"stale:{e['edge_id']}:{last}",
+            "edge_id": e["edge_id"], "device_id": "", "metric": "__stale__",
+            "day": None, "day_to": None, "mean": None, "z": None, "k": None,
+            "label": "边节点掉线", "unit": "", "windows": 0,
+            "max_z": 0, "critical": True, "resolved": False, "last_seen": last,
+        })
+
+    states = _states()
+    for a in runs:
+        st = states.get(a["alert_key"]) or {}
+        muted = bool(st.get("muted_until")) and _to_ms(st["muted_until"]) > now
+        a["severity"] = "critical" if a["critical"] else "notice"
+        a["state"] = ("muted" if muted
+                      else "resolved" if a["resolved"]
+                      else "acked" if st.get("acked_at") else "pending")
+        a["device_name"] = device_name.get(a["device_id"], a["device_id"])
+        a["acked_at"] = st.get("acked_at")
+        a["acked_by"] = st.get("acked_by")
+        a["muted_until"] = st.get("muted_until")
+        a["mute_reason"] = st.get("mute_reason")
+
+    order = {"critical": 0, "notice": 1}
+    rank = {"pending": 0, "acked": 1, "muted": 2, "resolved": 3}
+    runs.sort(key=lambda a: (rank[a["state"]], order[a["severity"]], -(
+        a["last_seen"] or 0 if a["kind"] == "stale" else _day_no(a["day"]) * DAY_MS)))
+    return runs
+
+
+def _to_ms(value: Any) -> int:
+    """_plain 已经把 datetime 换成毫秒，这里只需兜住 None 和意外类型。"""
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, dt.datetime):
+        return int(value.timestamp() * 1000)
+    return 0
+
+
+def set_alert_state(key: str, actor: str, acked: bool = False,
+                    mute_hours: int = 0, reason: str = "") -> None:
+    now = now_ms()
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO alert_state(alert_key, acked_at, acked_by, muted_until,
+                                       mute_reason, updated_at)
+               VALUES(%s,%s,%s,%s,%s,%s)
+               ON CONFLICT(alert_key) DO UPDATE SET
+                 acked_at=COALESCE(EXCLUDED.acked_at, alert_state.acked_at),
+                 acked_by=COALESCE(EXCLUDED.acked_by, alert_state.acked_by),
+                 muted_until=COALESCE(EXCLUDED.muted_until, alert_state.muted_until),
+                 mute_reason=COALESCE(EXCLUDED.mute_reason, alert_state.mute_reason),
+                 updated_at=EXCLUDED.updated_at""",
+            (key, _ms(now) if acked else None, actor if acked else None,
+             _ms(now + mute_hours * 3600_000) if mute_hours else None,
+             reason or None, _ms(now)))
+    if acked:
+        audit(actor, "alert.ack", key, {})
+    if mute_hours:
+        audit(actor, "alert.mute", key, {"hours": mute_hours, "reason": reason})
+
+
+def clear_alert_mute(key: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """UPDATE alert_state SET muted_until=NULL, mute_reason=NULL, updated_at=%s
+               WHERE alert_key=%s""", (_ms(now_ms()), key))
+    audit("admin", "alert.unmute", key, {})
 
 
 def wordcloud(scope: str | None, days: int, today: str) -> list[dict[str, Any]]:

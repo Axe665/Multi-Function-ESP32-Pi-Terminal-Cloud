@@ -171,7 +171,9 @@ const wordOption = computed(() => {
       </div>
       <div class="md-list">
         <div v-for="a in advice" :key="a.id" class="md-list-row">
-          <span class="md-chip" :class="a.risk === 'alert' ? 'md-chip--alert' : 'md-chip--warn'">{{ a.risk }}</span>
+          <span class="sev-tag" :class="a.risk === 'alert' ? 'sev-tag--notice' : 'sev-tag--idle'">
+            {{ a.risk === 'alert' ? '告警' : '关注' }}
+          </span>
           <div class="md-grow">
             <div>{{ a.text }}</div>
             <div class="md-muted small">{{ fmtTime(a.created_at) }}，{{ a.source }}</div>

@@ -129,6 +129,11 @@ def overview() -> dict[str, Any]:
     # 完整率按「设备日」算：一台设备一天有数据才算完整，缺一台也能看见
     device_days = {(r["device_id"], r["day"]) for r in rows}
     complete = len(device_days) / max(1, len(ds) * 7) * 100
+    # 每天一张完整率，给总览画 7 点走势；缺口出现在哪天比一个总数有用
+    days = [(today - dt.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    completeness_days = [
+        round(len({r["device_id"] for r in rows if r["day"] == d}) / max(1, len(ds)) * 100)
+        for d in days]
 
     alerts = store.advice(risk="alert", limit=200)
     top: dict[str, dict] = {}
@@ -139,14 +144,32 @@ def overview() -> dict[str, Any]:
         top[key]["count"] += 1
     alerts_top = sorted(top.values(), key=lambda x: -x["count"])[:5]
 
+    feed = store.alert_feed(days=30)
+    open_alerts = [a for a in feed if a["state"] in ("pending", "acked", "muted")]
+    pending_alerts = [a for a in open_alerts if a["state"] == "pending"]
+    critical = sum(1 for a in pending_alerts if a["severity"] == "critical")
+    notice = sum(1 for a in pending_alerts if a["severity"] == "notice")
+    status_level = "critical" if critical else "notice" if notice else "ok"
+
     latest = store.reports(1)
     counter = store.counters()
     return {
+        "status": {
+            "level": status_level,
+            "critical": critical,
+            "notice": notice,
+            "acked": sum(1 for a in open_alerts if a["state"] == "acked"),
+            "muted": sum(1 for a in open_alerts if a["state"] == "muted"),
+            "stale_edges": sum(1 for a in pending_alerts if a["kind"] == "stale"),
+            "top": pending_alerts[:3],
+        },
+        "completeness_delta": round(completeness_days[-1] - sum(completeness_days[:-1]) / 6, 1) if completeness_days else 0,
         "cloud_id": config.CLOUD_ID, "cloud_name": config.CLOUD_NAME,
         "generated_at": now,
         "edges_total": len(es), "edges_online": len(online_edges),
         "devices_total": len(ds), "devices_online": len(online_devices),
         "completeness_7d": round(complete, 1),
+        "completeness_days": completeness_days,
         "rows_7d": len(rows),
         "alerts_total": len(alerts),
         "alerts_top": alerts_top,
@@ -157,6 +180,49 @@ def overview() -> dict[str, Any]:
         "ai_mode": config.AI_MODE,
         "edges": es,
     }
+
+
+@router.get("/alerts", dependencies=admin)
+def alerts(days: int = Query(default=30, ge=1, le=90),
+           state: str = Query(default="open")) -> list[dict[str, Any]]:
+    rows = store.alert_feed(days=days)
+    if state == "open":
+        rows = [r for r in rows if r["state"] in ("pending", "acked", "muted")]
+    return rows
+
+
+def _alert_key(body: dict[str, Any]) -> str:
+    key = str(body.get("key") or "")
+    if not key:
+        raise HTTPException(422, "需要 key")
+    return key
+
+
+@router.post("/alerts/ack", dependencies=admin)
+def ack_alert(body: dict[str, Any]) -> dict[str, Any]:
+    key = _alert_key(body)
+    store.set_alert_state(key, "admin", acked=True)
+    return {"ok": True}
+
+
+@router.post("/alerts/mute", dependencies=admin)
+def mute_alert(body: dict[str, Any]) -> dict[str, Any]:
+    key = _alert_key(body)
+    reason = str(body.get("reason") or "").strip()
+    hours = int(body.get("hours") or 0)
+    if not reason:
+        raise HTTPException(422, "静音需要填写理由")
+    if hours <= 0:
+        raise HTTPException(422, "静音需要有效期")
+    store.set_alert_state(key, "admin", mute_hours=hours, reason=reason)
+    return {"ok": True}
+
+
+@router.post("/alerts/unmute", dependencies=admin)
+def unmute_alert(body: dict[str, Any]) -> dict[str, Any]:
+    key = _alert_key(body)
+    store.clear_alert_mute(key)
+    return {"ok": True}
 
 
 @router.get("/edges", dependencies=admin)

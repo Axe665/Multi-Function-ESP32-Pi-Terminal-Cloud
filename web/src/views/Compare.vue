@@ -50,15 +50,24 @@ const option = computed(() => {
       type: 'value',
       scale: true,
       splitLine: { lineStyle: { color: tk.value.split } },
-      axisLabel: { fontSize: 11, color: tk.value.axis },
+      axisLabel: { fontSize: 11, color: tk.value.axis, formatter: '{value}' },
     },
-    series: edges.map((e) => ({
+    series: edges.map((e, i) => ({
       name: e.name,
       type: 'line',
       smooth: true,
       symbol: 'none',
       lineStyle: { width: 2 },
-      data: (data.value?.days || []).map((d) => e.points.find((p) => p.day === d)?.value ?? null),
+      data: (data.value?.days || []).map((d) => e.points.find((p) => p.day === d)?.index ?? null),
+      // 首日 100 是这页唯一的比较基准，画出来省得用户自己找
+      ...(i === 0 ? {
+        markLine: {
+          silent: true, symbol: 'none',
+          lineStyle: { color: tk.value.axis, type: 'dashed', width: 1 },
+          label: { formatter: '首日 = 100', color: tk.value.axis, fontSize: 10, position: 'insideEndTop' },
+          data: [{ yAxis: 100 }],
+        },
+      } : {}),
     })),
   }
 })
@@ -74,7 +83,7 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <PageHeader title="对比" sub="同一指标在不同边之间的走势，指数以各自首日为 100。">
+  <PageHeader title="对比" sub="同一指标在不同边之间的走势，首日统一为 100，只比变化不比绝对值。">
     <select v-model="metric" class="md-field" aria-label="指标">
       <option v-for="m in meta.metrics" :key="m.key" :value="m.key">
         {{ m.label }}（{{ m.unit }}）
@@ -95,11 +104,11 @@ const rows = computed(() => {
   <section class="md-card table">
     <div class="section-head">
       <h2>末日均值</h2>
-      <span class="md-muted">与首日对比</span>
+      <span class="md-muted">变化按首日归一到 100 折算</span>
     </div>
     <table class="md-table">
       <thead>
-        <tr><th>边</th><th class="num">首日</th><th class="num">末日</th><th class="num">变化</th><th class="num">最小 k</th></tr>
+        <tr><th>边</th><th class="num">首日均值</th><th class="num">末日均值</th><th class="num">较首日</th><th class="num">最小 k</th></tr>
       </thead>
       <tbody>
         <tr v-for="r in rows" :key="r.edge_id">
@@ -107,8 +116,8 @@ const rows = computed(() => {
           <td class="num">{{ fmtNum(r.first?.value, 2) }}</td>
           <td class="num">{{ fmtNum(r.last?.value, 2) }}</td>
           <td class="num">
-            <span class="md-chip" :class="(r.last?.index ?? 100) >= 100 ? 'md-chip--ok' : 'md-chip--warn'">
-              {{ fmtNum(r.last?.index, 1) }}
+            <span class="change">
+              {{ (r.last?.index ?? 100) >= 100 ? '+' : '−' }}{{ fmtNum(Math.abs((r.last?.index ?? 100) - 100), 1) }}%
             </span>
           </td>
           <td class="num">{{ r.k_min }}</td>
@@ -119,6 +128,8 @@ const rows = computed(() => {
 </template>
 
 <style scoped>
+/* 涨跌本身不是告警，颜色留给阈值突破 */
+.change { font-variant-numeric: tabular-nums; }
 .error { color: var(--md-error); margin-bottom: var(--space-3); }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
 .table { margin-top: var(--space-4); }

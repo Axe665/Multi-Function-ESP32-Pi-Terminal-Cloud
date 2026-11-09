@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api, fmtDay, fmtNum } from '../api'
+import { api, fmtDay, fmtNum, fmtTime } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useSnack } from '../components/useSnack'
 
@@ -113,23 +113,21 @@ const budget = computed(() => health.value?.api_budget ?? 0)
         <h2>报告列表</h2>
         <span class="md-muted">{{ list.length }} 份</span>
       </div>
-      <table class="md-table">
-        <thead><tr><th>范围</th><th>周期</th><th>模型</th><th class="num">token</th></tr></thead>
-        <tbody>
-          <tr v-for="r in list" :key="r.id" :class="{ 'row--active': r.id === active }" @click="open(r.id)" tabindex="0"
-              @keydown.enter="open(r.id)">
-            <td>
-              <strong>{{ scopeLabel[r.scope] || r.scope }}</strong>
-              <div class="md-mono md-muted">{{ r.scope_id || '全部' }}</div>
-              <div class="md-muted small">{{ taskLabel[r.task] || '趋势解读' }}</div>
-            </td>
-            <td>{{ fmtDay(r.period_start) }} – {{ fmtDay(r.period_end) }}</td>
-            <td class="md-muted">{{ r.model }}</td>
-            <td class="num">{{ r.model === 'rules-v1' ? '—' : `${fmtNum(r.tokens_in, 0)} / ${fmtNum(r.tokens_out, 0)}` }}</td>
-          </tr>
-          <tr v-if="!list.length"><td colspan="4" class="md-muted">还没有报告。</td></tr>
-        </tbody>
-      </table>
+      <div class="rep-list">
+        <button
+          v-for="r in list"
+          :key="r.id"
+          class="rep"
+          :class="{ 'rep--active': r.id === active }"
+          @click="open(r.id)"
+        >
+          <span class="rep-title">{{ taskLabel[r.task] || '趋势解读' }} · {{ scopeLabel[r.scope] || r.scope }}</span>
+          <span class="rep-meta">
+            {{ fmtDay(r.period_start) }} – {{ fmtDay(r.period_end) }}，{{ r.model }}，{{ fmtTime(r.created_at) }} 生成
+          </span>
+        </button>
+        <p v-if="!list.length" class="md-muted">还没有报告。</p>
+      </div>
     </section>
 
     <section class="md-card">
@@ -148,7 +146,9 @@ const budget = computed(() => health.value?.api_budget ?? 0)
 
         <div v-if="detail.content.findings?.length" class="md-list">
           <div v-for="(f, i) in detail.content.findings" :key="i" class="md-list-row">
-            <span class="md-chip" :class="f.risk === 'alert' ? 'md-chip--alert' : 'md-chip--warn'">{{ f.risk }}</span>
+            <span class="sev-tag" :class="f.risk === 'alert' ? 'sev-tag--notice' : 'sev-tag--idle'">
+              {{ f.risk === 'alert' ? '告警' : '关注' }}
+            </span>
             <div class="md-grow">
               <div>{{ f.label }}</div>
               <div class="md-muted small">{{ f.detail }}</div>
@@ -204,8 +204,29 @@ const budget = computed(() => health.value?.api_budget ?? 0)
   gap: var(--space-4); margin-top: var(--space-4); align-items: start;
 }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
-.row--active { background: var(--md-secondary-container); }
-tbody tr { cursor: pointer; }
+.rep-list {
+  display: grid;
+  gap: 2px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+.rep {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--md-shape-sm);
+  cursor: pointer;
+  color: var(--md-on-surface);
+}
+.rep:hover { background: var(--md-surface-container-high); }
+.rep:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
+.rep--active { background: var(--md-secondary-container); }
+.rep-title { font: var(--md-title-small); }
+.rep-meta { font: var(--md-body-small); color: var(--md-on-surface-variant); }
 .ai-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
 .headline { font: var(--md-title-large); margin: var(--space-2) 0; }
 .narrative { font: var(--md-body-medium); }
