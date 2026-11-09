@@ -147,8 +147,8 @@ const kpis = computed(() => {
 .topology {
   width: 100%; height: 340px; display: block;
   border-radius: var(--md-shape-sm);
-  /* 星座图是加色混合，配反色底 */
-  background: var(--md-inverse-surface);
+  background: var(--md-card-bg);
+  border: 1px solid var(--md-card-border);
 }
 .topo-legend {
   display: flex;
@@ -170,10 +170,10 @@ const kpis = computed(() => {
   border-radius: 50%;
   display: inline-block;
 }
-.lg--center { background: #ebf5e4; }
-.lg--edge { background: #85db9e; }
-.lg--sat { background: #9eada1; }
-.lg--off { background: #4a514c; }
+.lg--center { background: #1a1f18; }
+.lg--edge { background: #0f6b38; }
+.lg--sat { background: #858c85; }
+.lg--off { background: #b9c0b9; }
 .topo-note { margin-left: auto; }
 .trio {
   display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.9fr);

@@ -58,12 +58,18 @@ void main() {
 const LINE_FS = `#version 300 es
 precision highp float;
 in float vAlpha;
+uniform vec3 uLine;
 out vec4 outColor;
-void main() { outColor = vec4(0.58, 0.98, 0.72, vAlpha); }`;
+void main() { outColor = vec4(uLine, vAlpha); }`;
 
-const TEAL = [0.52, 0.86, 0.62];
-const INK = [0.92, 0.96, 0.88];
-const GREY = [0.62, 0.68, 0.63];
+function palette() {
+  const dark = document.documentElement.dataset.theme === "dark";
+  return dark
+    ? { ink: [0.92, 0.96, 0.88], teal: [0.52, 0.86, 0.62],
+        grey: [0.62, 0.68, 0.63], line: [0.58, 0.98, 0.72] }
+    : { ink: [0.10, 0.12, 0.10], teal: [0.06, 0.42, 0.22],
+        grey: [0.52, 0.58, 0.52], line: [0.06, 0.42, 0.22] };
+}
 
 export function createConstellation(canvas) {
   const gl = canvas.getContext("webgl2", { antialias: true, alpha: true, premultipliedAlpha: false });
@@ -101,9 +107,14 @@ export function createConstellation(canvas) {
     view: gl.getUniformLocation(lineProg, "uView"),
     model: gl.getUniformLocation(lineProg, "uModel"),
     time: gl.getUniformLocation(lineProg, "uTime"),
+    color: gl.getUniformLocation(lineProg, "uLine"),
   };
 
-  function build({ edges = [], alerts = 0 }) {
+  let last = { edges: [], alerts: 0 };
+
+  function build({ edges = [], alerts = 0 } = {}) {
+    last = { edges, alerts };
+    const { ink, teal, grey } = palette();
     nodes.pos = []; nodes.color = []; nodes.size = [];
     links.pos = []; links.fade = [];
 
@@ -121,7 +132,7 @@ export function createConstellation(canvas) {
     };
 
     const center = [0, 0, 0];
-    push(center, INK, 30);
+    push(center, ink, 30);
 
     const n = Math.max(1, edges.length);
     edges.forEach((e, i) => {
@@ -129,7 +140,7 @@ export function createConstellation(canvas) {
       const r = n === 1 ? 0 : 1.15;
       // 三个边放在不同高度，投影后才有纵深，不会压成一条横线
       const hub = [Math.cos(ang) * r, Math.sin(ang) * 0.62, Math.sin(ang) * r * 0.85];
-      push(hub, e.online === false ? GREY : TEAL, 22);
+      push(hub, e.online === false ? grey : teal, 22);
       link(center, hub, 0.9);
 
       const k = Math.max(1, e.devices || 1);
@@ -140,7 +151,7 @@ export function createConstellation(canvas) {
           hub[1] + Math.sin(a2 * 1.3) * 0.34,
           hub[2] + Math.sin(a2) * 0.40,
         ];
-        push(sat, GREY, 14);
+        push(sat, grey, 14);
         link(hub, sat, 0.5);
       }
     });
@@ -206,6 +217,7 @@ export function createConstellation(canvas) {
     gl.uniformMatrix4fv(lloc.view, false, view);
     gl.uniformMatrix4fv(lloc.model, false, model);
     gl.uniform1f(lloc.time, t);
+    gl.uniform3f(lloc.color, ...palette().line);
     gl.drawArrays(gl.LINES, 0, links.fade.length);
 
     gl.useProgram(nodeProg);
@@ -226,9 +238,11 @@ export function createConstellation(canvas) {
   });
 
   build({});
+  const themeObs = new MutationObserver(() => build(last));
+  themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   return {
     setData: build,
-    destroy() { stop(); ro.disconnect(); },
+    destroy() { stop(); themeObs.disconnect(); ro.disconnect(); },
   };
 }
 
