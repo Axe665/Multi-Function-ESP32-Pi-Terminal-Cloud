@@ -94,7 +94,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
 </script>
 
 <template>
-  <PageHeader title="AI 报告" sub="默认走本地 Ollama；模型不可用时退回规则模板并标为低置信度，不会留空报告。">
+  <PageHeader title="AI 报告" sub="默认使用本地 Ollama。模型不可用时落规则模板，置信度标为低。">
     <select v-model="scope" class="md-field" aria-label="报告范围">
       <option value="fleet">全网</option>
       <option value="edge">单边</option>
@@ -163,7 +163,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
           prompt {{ detail.prompt_hash }}，{{ detail.model }}，{{ fmtDay(detail.period_start) }}
         </p>
       </template>
-      <p v-else class="md-muted">选一份报告看详情。</p>
+      <p v-else class="md-muted">选择一份报告查看详情。</p>
     </section>
   </div>
 
@@ -186,7 +186,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       <div class="md-list">
         <div class="md-list-row"><div class="md-grow">本月 token<div class="md-muted small">上限 {{ fmtNum(budget, 0) }}</div></div><span class="md-mono">{{ fmtNum(used, 0) }}</span></div>
         <div class="md-list-row"><div class="md-grow">缓存命中<div class="md-muted small">同输入 24 h 内复用</div></div><span class="md-mono">{{ cacheHits }}</span></div>
-        <div class="md-list-row"><div class="md-grow">单次输入上限<div class="md-muted small">超了先砍指标明细</div></div><span class="md-mono">8k</span></div>
+        <div class="md-list-row"><div class="md-grow">单次输入上限<div class="md-muted small">超出后先裁剪指标明细</div></div><span class="md-mono">8k</span></div>
         <div class="md-list-row"><div class="md-grow">单次输出上限<div class="md-muted small">强约束 JSON</div></div><span class="md-mono">1k</span></div>
       </div>
     </section>

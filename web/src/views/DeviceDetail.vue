@@ -158,7 +158,7 @@ const wordOption = computed(() => {
       <section class="md-card">
         <div class="section-head">
           <h2>词云</h2>
-          <span class="md-muted">该边的建议用词，最近 7 天</span>
+          <span class="md-muted">该边最近 7 天的建议用词</span>
         </div>
         <ChartBox :option="wordOption" height="280px" />
       </section>
@@ -166,7 +166,7 @@ const wordOption = computed(() => {
 
     <section class="md-card advice">
       <div class="section-head">
-        <h2>建议流</h2>
+        <h2>建议</h2>
         <span class="md-muted">最近 {{ advice.length }} 条</span>
       </div>
       <div class="md-list">

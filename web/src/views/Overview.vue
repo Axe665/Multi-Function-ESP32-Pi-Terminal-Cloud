@@ -62,7 +62,7 @@ const kpis = computed(() => {
   <section class="md-card">
     <div class="section-head">
       <h2>全网拓扑</h2>
-      <span class="md-muted">本机在中心，每条连线是一份 edge-report 的来路</span>
+      <span class="md-muted">本机在中心，连线表示 edge-report 的上报路径</span>
     </div>
     <canvas ref="canvas" class="topology"></canvas>
     <div class="topo-legend" aria-hidden="true">
@@ -87,7 +87,7 @@ const kpis = computed(() => {
   <div class="trio">
     <section class="md-card">
       <div class="section-head">
-        <h2>本周 AI 摘要</h2>
+        <h2>本周报告摘要</h2>
         <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
       </div>
       <template v-if="latest">
@@ -97,7 +97,7 @@ const kpis = computed(() => {
         <ul class="actions">
           <li v-for="(a, i) in latest.content.actions || []" :key="i">{{ a }}</li>
         </ul>
-        <RouterLink class="md-btn md-btn--text" to="/reports">打开报告</RouterLink>
+        <RouterLink class="md-btn md-btn--text" to="/reports">查看报告</RouterLink>
       </template>
       <p v-else class="md-muted">还没有报告。</p>
     </section>
@@ -122,7 +122,7 @@ const kpis = computed(() => {
     <section class="md-card">
       <div class="section-head">
         <h2>隐私</h2>
-        <RouterLink class="md-btn md-btn--text" to="/privacy">看审计</RouterLink>
+        <RouterLink class="md-btn md-btn--text" to="/privacy">查看审计</RouterLink>
       </div>
       <div class="md-list">
         <div class="md-list-row"><div class="md-grow">被抑制的桶</div><span class="md-mono">{{ fmtNum(o?.suppressed_buckets, 0) }}</span></div>

@@ -27,7 +27,7 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
 <template>
   <PageHeader
     title="边与设备"
-    :sub="`${edges.length} 个边、${devices.length} 台设备。点边看设备，点设备看趋势。`"
+    :sub="`${edges.length} 个边，${devices.length} 台设备。选择边可筛选设备，选择设备查看趋势。`"
   >
     <span class="md-chip">{{ devices.filter((d) => d.online).length }} 台在线</span>
     <button v-if="activeEdge" class="md-btn md-btn--text" @click="activeEdge = ''">显示全部边</button>

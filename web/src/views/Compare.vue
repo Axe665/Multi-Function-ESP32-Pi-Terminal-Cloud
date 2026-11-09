@@ -74,7 +74,7 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <PageHeader title="对比" sub="同一指标在不同边之间的走势；指数以各自首日为 100。">
+  <PageHeader title="对比" sub="同一指标在不同边之间的走势，指数以各自首日为 100。">
     <select v-model="metric" class="md-field" aria-label="指标">
       <option v-for="m in meta.metrics" :key="m.key" :value="m.key">
         {{ m.label }}（{{ m.unit }}）

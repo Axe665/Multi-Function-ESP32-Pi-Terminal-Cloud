@@ -28,7 +28,7 @@ const kRows = computed(() => {
 <template>
   <PageHeader
     title="隐私审计"
-    :sub="`云端到底拿到了什么？只存日聚合、建议文本和计数。保留 ${audit?.retention_days ?? '—'} 天。`"
+    :sub="`云端只保存日聚合、建议文本和计数，保留 ${audit?.retention_days ?? '—'} 天。`"
   >
     <span class="md-chip">门槛 k ≥ {{ audit?.k_min ?? 5 }}</span>
   </PageHeader>
@@ -40,7 +40,7 @@ const kRows = computed(() => {
     <div class="kpi"><div class="label">被抑制的桶</div><div class="value">{{ fmtNum(audit.suppressed_buckets, 0) }}</div><div class="note">k&lt;5，从未离开端</div></div>
     <div class="kpi"><div class="label">原始字段拦截</div><div class="value">{{ audit.raw_rejected }}</div><div class="note">摄取时直接 422</div></div>
     <div class="kpi"><div class="label">已入库行</div><div class="value">{{ fmtNum(audit.rows_ingested, 0) }}</div><div class="note">全部是日聚合</div></div>
-    <div class="kpi"><div class="label">导出记录</div><div class="value">{{ audit.exports?.length || 0 }}</div><div class="note">报告导出全部留痕</div></div>
+    <div class="kpi"><div class="label">导出记录</div><div class="value">{{ audit.exports?.length || 0 }}</div><div class="note">每次导出都写审计</div></div>
   </section>
 
   <div class="duo">
@@ -57,7 +57,7 @@ const kRows = computed(() => {
         </div>
       </div>
       <p class="md-muted small">
-        分布里没有低于 5 的桶，因为低于门槛的行在端侧就被丢弃了；边只上报抑制计数。
+        分布里没有低于 5 的桶：低于门槛的行在端侧已丢弃，边只上报抑制计数。
       </p>
     </section>
 
