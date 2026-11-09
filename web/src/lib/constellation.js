@@ -249,6 +249,13 @@ export function createConstellation(canvas) {
 function fallback(canvas) {
   const ctx = canvas.getContext("2d");
   let data = { edges: [] };
+
+  // 没有 WebGL2 时的兜底：颜色取主题 token，否则暗色下中心节点会看不见
+  const token = (name, backup) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || backup;
+  };
+
   const draw = () => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = canvas.clientWidth * dpr;
@@ -256,31 +263,44 @@ function fallback(canvas) {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#12161a";
-    ctx.beginPath();
-    ctx.arc(w / 2, h / 2, 5, 0, Math.PI * 2);
-    ctx.fill();
+
+    const ink = token("--md-on-surface", "#1a1c18");
+    const accent = token("--md-primary", "#386a20");
+    const faint = token("--md-outline", "#74796d");
+
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = accent;
+    ctx.fillStyle = faint;
     const n = Math.max(1, data.edges.length);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 - Math.PI / 2;
       const x = w / 2 + Math.cos(a) * w * 0.28;
       const y = h / 2 + Math.sin(a) * h * 0.3;
-      ctx.strokeStyle = "rgba(20,105,90,0.5)";
       ctx.beginPath();
       ctx.moveTo(w / 2, h / 2);
       ctx.lineTo(x, y);
       ctx.stroke();
-      ctx.fillStyle = "#14695a";
+      ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.arc(x, y, 4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 0.55;
     }
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, 5, 0, Math.PI * 2);
+    ctx.fill();
   };
+
   const ro = new ResizeObserver(draw);
   ro.observe(canvas);
+  const themeObs = new MutationObserver(draw);
+  themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   draw();
   return {
     setData(d) { data = d || data; draw(); },
-    destroy() { ro.disconnect(); },
+    destroy() { ro.disconnect(); themeObs.disconnect(); },
   };
 }
