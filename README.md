@@ -5,9 +5,34 @@
 
 ![总览](docs/screenshots/overview.png)
 
+## 边、云两仓的分工
+
+| | 云（本仓） | 边（另一仓） |
+|---|---|---|
+| 位置 | 内网私有云 | 局域网内一台管理节点 |
+| 面向对象 | 多个边节点，每个边下面若干台设备 | 3 台终端（1 台带屏 + 2 台无头） |
+| 数据粒度 | 日聚合，没有逐条记录 | 5 分钟窗口的假名聚合 |
+| 身份 | 管理员口令 + TOTP，会话是签名 cookie | 设备证书 + 配对码，MQTT 走 mTLS |
+| 存储 | Postgres 16 + Redis 7 | SQLite，设 `EDGE_DB_KEY` 走 SQLCipher |
+| 队列 | RQ 跑三类文档任务；清理、备份、恢复演练由 worker 的排期线程触发 | 无队列，发件箱表 + 退避重试 |
+| 分析 | 跨边对比、AI 解读、隐私审计 | 趋势、7×24 时段矩阵、词云、窗口级 z 异常 |
+| 告警 | 日聚合；2 小时没有上报算边掉线 | 5 分钟窗口；15 分钟没有批次算数据过期 |
+| 入口 | 443 管理台、8443 mTLS 收报、8088 本机明文 | 8001，默认只绑 127.0.0.1 |
+| 备份 | 每天 `pg_dump` 留 14 天，周日加密副本，每月恢复演练 | 每天一份 SQLite 快照，留 7 份 |
+| 保留期 | 日聚合 730 天、文本 365 天 | 聚合 180 天、文本 365 天 |
+| 架构文档 | §6 云端 | §5 边缘节点 |
+
+两边共用一份 `orpi.edge.report.v1` 契约：**边仓拥有它**，云仓 vendor 一份副本，
+`scripts/sync_contracts.py --check` 两边都跑。改字段的顺序是先改边仓、再同步云仓，
+反过来会漂移。
+
+架构文档 v2.2 里 §5 写边、§6 写云，所以两个仓的「逐条对照」表条目不同，
+写法一样：一条对应一个编号，写清要求、现状和怎么验。两边都如实标出没做的部分，
+不把「驱动已内置但默认没开」写成「已支持」。
+
 ## 每个页面回答一个问题
 
-前端与边仓同一套：Vue 3 + Vite + ECharts，自写 Material 3 token，亮色默认可切暗色；ECharts 与拓扑图跟随换主题。
+前端与边仓同一套：Vue 3 + Vite + ECharts，自写 Material 3 token，亮色默认，侧栏左下角可切暗色；ECharts 与拓扑缩略图跟随换主题。
 
 | 页面 | 它回答的问题 | 关键内容 |
 |---|---|---|
@@ -62,6 +87,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
         word_freq         jieba 词频
         ai_reports        AI 解读（同输入 24 h 内复用）
         audit             每次摄取、登录与导出留痕
+        alert_state       人工动作（确认/静音），告警本身由 telemetry_daily 现算
 ```
 
 幂等键 `(edge_id, report_id)`；重复投递返回 `duplicate: true` 且不写库。
@@ -84,9 +110,32 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 | 保留期清理 | L2 日聚合 2 年、L3 文本（建议/词频/报告）1 年，按天删 | `cloud/jobs.py` |
 | 每日全网报告 | 24 h 没有新报告就补一份 | 同上 |
 | 隐私审计 | k 分布、抑制计数、拦截计数、字段白名单、导出留痕 | `tests/test_ingest.py` |
+| 告警状态机 | 日聚合 z 推出的告警，确认、静音、取消静音都写审计 | `tests/test_alerts.py` |
 | 公网最小暴露 | 只有 `/ingest/edge-report` 与 `/health` 不要求登录；`/ollama/*` 只在内网站点 | `docker/Caddyfile` |
 | mDNS 广播 | 云广播 `_orpi-cloud._tcp`（v/id/port/ca_fp），边据此发现云 | `cloud/mdns.py`，容器内实测 `on: true` |
-| 演示模式 | `demo` 与构建号随 `/health` 暴露，前端挂横幅；seed 写审计 | `cloud/seed.py`、`cloud/api.py` |
+| 演示模式 | `demo` 与构建号随 `/health` 暴露，侧栏底部标注「演示数据」；seed 写审计 | `cloud/seed.py`、`cloud/api.py` |
+
+## 告警怎么判定、怎么关掉
+
+一条告警不是「一天越界」，而是**一段连续越界的日子**：一段只算一条。
+不合并的话，一次持续一周的偏移会刷出七条，列表就没法看了。
+
+| 级别 | 判定 |
+|---|---|
+| 严重 | 段内有两个相邻日子的 `\|z\| ≥ 2.5`；或某个边 2 小时没有上报 |
+| 注意 | 单日 `\|z\| ≥ 2`，但没到严重的程度 |
+
+人工只有两个动作，恢复是自动的：
+
+| 状态 | 怎么进来 | 效果 |
+|---|---|---|
+| 待处理 | 新的一段越界日 | 进首屏「待处理」，按严重度排序 |
+| 已确认 | 点「确认」 | 留在列表里，视觉降级，不再计入首屏结论 |
+| 已静音 | 点「静音」，选 1h / 8h / 24h / 7d 并填理由 | 条目变灰，显示理由与到期时间，可取消静音 |
+| 已恢复 | 后续日子回到 `\|z\| < 2` | 读取时自动推出，不需要人工关 |
+
+确认、静音、取消静音都写 `audit`：谁、什么时候、对哪一条、理由是什么。
+静音不带理由会被 422 挡掉——审计里写不出「为什么」的静音等于没写。
 
 ## 隐私边界
 
@@ -108,6 +157,15 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 公网只应暴露两条：`/api/v1/ingest/edge-report` 与 `/api/v1/health`。
 管理台与 Ollama 仅内网——`docker/Caddyfile` 就是这么配的，其余路径直接 404。
 
+告警相关：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/v1/alerts` | 待处理 / 已确认 / 已静音的告警（一段连续越界日一条） |
+| POST | `/api/v1/alerts/ack` | 确认一条，body 是 `{"key": "..."}` |
+| POST | `/api/v1/alerts/mute` | 静音一条，必填时长与理由 |
+| POST | `/api/v1/alerts/unmute` | 取消静音 |
+
 ## 契约
 
 | 契约 | 位置 | 谁拥有 |
@@ -121,18 +179,19 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**26 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
-公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔。
+**30 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
+公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
+告警按日聚合的合并与确认/静音/审计。
 
 ## 与架构文档 v2.2 的逐条对照
 
 | 文档条目 | 要求 | 现状 |
 |---|---|---|
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
-| §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
+| §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱）与 alert_state（人工动作） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板、建议文本按不可信数据处理 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`；建议文本去控制字符、截断并用「」分隔，prompt 明确它是数据不是指令 |
 | §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/日热力/词云/建议流）；Vue3 + Vite + ECharts，自写 M3 token |
-| §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth |
+| §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth/alerts |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
 | §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |
@@ -151,10 +210,12 @@ python3 -m unittest discover -s tests -t . -v
 ## 目录
 
 ```
-cloud/         API、存储、AI、鉴权、调度、前端（含 WebGL 拓扑）
+cloud/         API、存储、AI、鉴权、调度、备份
+web/           Vue 3 + Vite 前端：M3 token、ECharts、拓扑缩略图
 contracts/     ai 契约、示例、OpenAPI、vendor 副本
-tests/         摄取 / AI / 鉴权
+tests/         摄取 / AI / 鉴权 / 告警
 docker/        compose、Caddyfile
 scripts/       vendor 契约同步、备份
 docs/          截图
+data/          运行期数据，不进仓库
 ```
