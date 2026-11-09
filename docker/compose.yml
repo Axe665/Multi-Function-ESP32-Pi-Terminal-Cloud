@@ -1,0 +1,38 @@
+services:
+  cloud:
+    build: ..
+    image: modular-terminal-cloud:1.0.0
+    container_name: mt-cloud
+    restart: unless-stopped
+    ports:
+      # 公网入口只在 /api/v1/ingest/edge-report 与 /api/v1/health，见 deploy/Caddyfile
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - ../data:/app/data
+    environment:
+      CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
+      CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}
+      CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
+      CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
+      CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
+      CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
+      CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      TZ: Asia/Shanghai
+    depends_on:
+      - ollama
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  # 本地模型（可选）。没有 GPU 时会很慢，把 CLOUD_AI_MODE 设成 rules 可以直接跳过。
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mt-ollama
+    restart: unless-stopped
+    volumes:
+      - ../data/ollama:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: 8g

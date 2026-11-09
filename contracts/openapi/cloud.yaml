@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Modular Terminal Cloud API
+  version: 1.0.0
+  description: |
+    私有云 API。公网只应暴露 /ingest/edge-report 与 /health；
+    管理台与其余管理 API 仅内网可达（由 Caddy 控制）。
+servers:
+  - url: http://127.0.0.1:8002
+paths:
+  /api/v1/ingest/edge-report:
+    post:
+      summary: 边上报（幂等，按 edge_id + report_id）
+      description: |
+        载荷出现 user_id/subject/values 等原始字段时 422 并累加 raw_rejected；
+        telemetry_daily 里任何一行 k<5 时整份拒收（模型层校验）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './vendor/edge/edge-report@v1.json'
+      responses:
+        '200':
+          description: 已接受或已存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: boolean }
+                  duplicate: { type: boolean }
+                  report_id: { type: string }
+                  rows: { type: integer }
+        '422':
+          description: 原始字段或 schema 不合规
+  /api/v1/meta:
+    get:
+      summary: 指标字典、AI 模式、k 门槛
+      responses:
+        '200': { description: 元信息 }
+  /api/v1/overview:
+    get:
+      summary: 总览（在线数、完整率、告警 Top5、最新 AI 报告）
+      responses:
+        '200': { description: 总览对象 }
+  /api/v1/edges:
+    get:
+      summary: 边列表（含设备、有数据天数、k 最小值）
+      responses:
+        '200': { description: 边数组 }
+  /api/v1/devices:
+    get:
+      summary: 设备列表
+      parameters:
+        - { name: edge, in: query, schema: { type: string } }
+      responses:
+        '200': { description: 设备数组 }
+  /api/v1/series:
+    get:
+      summary: 日聚合序列
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+        - { name: edge, in: query, schema: { type: string } }
+        - { name: device, in: query, schema: { type: string } }
+      responses:
+        '200': { description: points[{day,mean,z,k}] }
+  /api/v1/compare:
+    get:
+      summary: 多边同指标对比（首日 = 100 的指数）
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: edges[{edge_id,name,points,k_min}] }
+  /api/v1/heatmap:
+    get:
+      summary: 单设备日聚合矩阵
+      responses:
+        '200': { description: cells[{day,mean,z}] }
+  /api/v1/wordcloud:
+    get:
+      summary: 词频
+      responses:
+        '200': { description: words[{word,count}] }
+  /api/v1/advice:
+    get:
+      summary: 建议流
+      parameters:
+        - { name: edge, in: query, schema: { type: string } }
+        - { name: risk, in: query, schema: { enum: [info, watch, alert] } }
+      responses:
+        '200': { description: 建议数组 }
+  /api/v1/daily:
+    get:
+      summary: 日聚合明细
+      parameters:
+        - { name: edge, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 40 } }
+      responses:
+        '200': { description: 行数组 }
+  /api/v1/ai/reports:
+    get:
+      summary: 报告列表
+      responses:
+        '200': { description: 报告数组 }
+    post:
+      summary: 生成报告（同 scope/period/输入 24 h 内复用）
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope: { enum: [fleet, edge, device] }
+                scope_id: { type: string }
+                mode: { enum: [local, api, rules] }
+      responses:
+        '200': { description: '{id, model, content}' }
+  /api/v1/ai/reports/{report_id}:
+    get:
+      summary: 报告内容与 token 消耗
+      parameters:
+        - { name: report_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: 报告 }
+        '404': { description: 不存在 }
+  /api/v1/privacy/audit:
+    get:
+      summary: k 分布、抑制计数、原始字段拦截、审计日志
+      responses:
+        '200': { description: 审计对象 }
+  /api/v1/health:
+    get:
+      summary: 自检
+      responses:
+        '200': { description: 数据库、鉴权、AI 模式 }

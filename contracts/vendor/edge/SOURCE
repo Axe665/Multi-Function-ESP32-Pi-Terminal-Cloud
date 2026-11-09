@@ -1,0 +1,13 @@
+# 云仓 vendor 的边侧契约
+#
+# 消费方（本仓）不修改这里的副本。要改就回边仓提 PR，
+# 再跑 scripts/sync_contracts.py --update edge 重新拉取。
+
+repo: https://github.com/Axe665/Multi-Function-ESP32-Pi-Terminal-Edge
+path: contracts/wire/edge-report.v1.json
+tag: contracts/edge-report/v1.0.0
+synced: 2026-11-09
+
+files:
+  edge-report@v1.json
+  edge-report@v1.example.json

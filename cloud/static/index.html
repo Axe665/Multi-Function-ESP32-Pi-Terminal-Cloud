@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云节点 · Modular Terminal Cloud</title>
+<meta name="color-scheme" content="light">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<a class="skip" href="#main">跳到主内容</a>
+<div class="shell">
+  <aside class="side">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="5" cy="5" r="1.6" /><circle cx="10" cy="5" r="1.6" /><circle cx="15" cy="5" r="1.6" />
+        <circle cx="5" cy="10" r="1.6" /><circle cx="10" cy="10" r="1.6" /><circle cx="15" cy="10" r="1.6" />
+        <circle cx="5" cy="15" r="1.6" /><circle cx="10" cy="15" r="1.6" class="on" /><circle cx="15" cy="15" r="1.6" />
+      </svg>
+      <div>
+        <div class="brand-name">Modular Terminal</div>
+        <div class="brand-scope" id="scope">私有云</div>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="主导航">
+      <a href="#/" data-nav="overview">总览</a>
+      <a href="#/edges" data-nav="edges">边与设备</a>
+      <a href="#/compare" data-nav="compare">对比</a>
+      <a href="#/reports" data-nav="reports">AI 报告</a>
+      <a href="#/privacy" data-nav="privacy">隐私审计</a>
+    </nav>
+
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+
+  <div class="frame">
+    <main id="main" class="canvas" tabindex="-1"></main>
+  </div>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
