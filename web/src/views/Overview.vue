@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, fmtNum, fmtTime } from '../api'
+import { createConstellation } from '../lib/constellation'
 import StatusBar from '../components/StatusBar.vue'
 import AlertList from '../components/AlertList.vue'
 import Topology from '../components/Topology.vue'
@@ -9,6 +10,8 @@ const o = ref(null)
 const alerts = ref([])
 const latest = ref(null)
 const error = ref('')
+const canvas = ref(null)
+let scene = null
 let timer = 0
 
 async function load() {
@@ -19,6 +22,12 @@ async function load() {
     latest.value = over.latest_ai
       ? await api(`/ai/reports/${over.latest_ai.id}`).catch(() => null)
       : null
+    scene?.setData?.({
+      edges: over.edges.map((e) => ({
+        id: e.edge_id, devices: e.devices, online: e.online_devices > 0,
+      })),
+      alerts: over.alerts_total,
+    })
     error.value = ''
   } catch (e) {
     error.value = e.message
@@ -26,10 +35,14 @@ async function load() {
 }
 
 onMounted(async () => {
+  if (canvas.value) scene = createConstellation(canvas.value)
   await load()
   timer = setInterval(load, 20000)
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  clearInterval(timer)
+  scene?.destroy?.()
+})
 
 const status = computed(() => o.value?.status || { level: 'ok' })
 
@@ -105,6 +118,20 @@ const measures = computed(() => {
     <div class="side">
       <section class="md-panel">
         <div class="section-head">
+          <h2>拓扑</h2>
+          <span class="md-muted">连线明暗 = 上报脉冲</span>
+        </div>
+        <canvas ref="canvas" class="topo-canvas" aria-hidden="true"></canvas>
+        <div class="topo-legend">
+          <span><i class="lg lg--center"></i>本机</span>
+          <span><i class="lg lg--edge"></i>在线边</span>
+          <span><i class="lg lg--sat"></i>设备</span>
+          <span><i class="lg lg--off"></i>离线</span>
+        </div>
+      </section>
+
+      <section class="md-panel">
+        <div class="section-head">
           <h2>近 7 天</h2>
           <span class="md-muted">日聚合口径</span>
         </div>
@@ -123,25 +150,10 @@ const measures = computed(() => {
         </dl>
       </section>
 
-      <section class="md-panel">
-        <div class="section-head">
-          <h2>告警 Top 5</h2>
-          <span class="md-muted">最近 7 天</span>
-        </div>
-        <div class="md-list">
-          <div v-for="(a, i) in o?.alerts_top || []" :key="i" class="md-list-row">
-            <div class="md-grow">
-              <div>{{ a.text }}</div>
-              <div class="md-muted small">{{ a.edge }}，{{ a.device }}</div>
-            </div>
-            <span class="sev-tag sev-tag--notice md-num">{{ a.count }}</span>
-          </div>
-          <p v-if="!o?.alerts_top?.length" class="md-muted">没有告警。</p>
-        </div>
-      </section>
     </div>
   </div>
 
+  <div class="bottom">
   <section class="md-section">
     <div class="section-head">
       <h2>本周报告摘要</h2>
@@ -161,6 +173,24 @@ const measures = computed(() => {
     </article>
     <p v-else class="md-muted">还没有报告。</p>
   </section>
+
+  <section class="md-section">
+    <div class="section-head">
+      <h2>告警 Top 5</h2>
+      <span class="md-muted">最近 7 天</span>
+    </div>
+    <div class="md-list">
+      <div v-for="(a, i) in o?.alerts_top || []" :key="i" class="md-list-row">
+        <div class="md-grow">
+          <div>{{ a.text }}</div>
+          <div class="md-muted small">{{ a.edge }}，{{ a.device }}</div>
+        </div>
+        <span class="sev-tag sev-tag--notice md-num">{{ a.count }}</span>
+      </div>
+      <p v-if="!o?.alerts_top?.length" class="md-muted">没有告警。</p>
+    </div>
+  </section>
+  </div>
 </template>
 
 <style scoped>
@@ -241,6 +271,52 @@ const measures = computed(() => {
   color: var(--md-on-surface-variant);
 }
 
+.topo-canvas {
+  width: 100%;
+  height: 128px;
+  display: block;
+  border-radius: var(--md-shape-sm);
+}
+.topo-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+  font: var(--md-label-small);
+  color: var(--md-on-surface-variant);
+}
+.topo-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lg {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.lg--center { background: #1a1f18; }
+.lg--edge { background: #0f6b38; }
+.lg--sat { background: #858c85; }
+.lg--off { background: #b9c0b9; }
+[data-theme='dark'] .lg--center { background: #ebf5e4; }
+[data-theme='dark'] .lg--edge { background: #85db9e; }
+[data-theme='dark'] .lg--sat { background: #9eada1; }
+[data-theme='dark'] .lg--off { background: #4a514c; }
+
+.bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  align-items: start;
+}
+.bottom .md-section {
+  margin-top: 0;
+}
+
 .headline {
   font: var(--md-title-large);
   margin: var(--space-2) 0;
@@ -265,7 +341,8 @@ const measures = computed(() => {
 }
 
 @media (max-width: 1100px) {
-  .top {
+  .top,
+  .bottom {
     grid-template-columns: minmax(0, 1fr);
   }
 }
