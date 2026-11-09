@@ -14,10 +14,12 @@ import httpx
 
 from . import config, store
 
+# 与终端仓 ModuleDataApi 的字段白名单同名
 LABELS = {
-    "bp.systolic": ("收缩压", "mmHg"), "spo2": ("血氧饱和度", "%"), "weight": ("体重", "kg"),
-    "env.temp": ("室内温度", "°C"), "env.humidity": ("相对湿度", "%"), "env.co2": ("CO₂ 浓度", "ppm"),
-    "energy.load": ("用电负荷", "kW"), "energy.pv": ("光伏出力", "kW"),
+    "systolic": ("收缩压", "mmHg"), "diastolic": ("舒张压", "mmHg"), "pulse": ("脉搏", "bpm"),
+    "temperature_c": ("温度", "°C"), "humidity_rh": ("湿度", "%"), "light_lux": ("光照", "lx"),
+    "battery_v": ("电池电压", "V"), "battery_pct": ("电量", "%"),
+    "counter_delta": ("计数增量", "次"), "counter_rate": ("计数速率", "次/min"),
 }
 
 
@@ -101,7 +103,8 @@ def _rules(summary: dict[str, Any]) -> dict[str, Any]:
             "findings": [], "actions": ["检查边的发件箱与云地址配置"], "confidence": "low",
         }
 
-    moved = sorted(ms, key=lambda m: abs(m["delta"]), reverse=True)
+    # 按相对变化排序：光照的 96 lx 和血压的 2.8 mmHg 不能直接比绝对值
+    moved = sorted(ms, key=lambda m: abs(m["pct"]), reverse=True)
     top, second = moved[0], (moved[1] if len(moved) > 1 else None)
     hot = [m for m in ms if m["max_abs_z"] >= 2.5]
 
@@ -156,6 +159,50 @@ PROMPT = """你是端-边-云系统的数据分析助手。只根据给出的 JS
 """
 
 
+def _budget_left() -> int:
+    used = store.counters().get("api_tokens", 0)
+    return max(0, config.API_BUDGET_TOKENS - used)
+
+
+def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """模式 A：公有 API。只发 k≥5 的日聚合，且受月度预算约束。"""
+    if not (config.PUBLIC_API_URL and config.PUBLIC_API_KEY):
+        return None
+    if _budget_left() <= 0:
+        store.audit("system", "ai.budget", "public_api", {"result": "exhausted"})
+        return None
+    body = {
+        "model": config.PUBLIC_MODEL,
+        "messages": [
+            {"role": "system", "content": PROMPT},
+            {"role": "user", "content": json.dumps(summary, ensure_ascii=False)},
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 800,
+        "temperature": 0.2,
+    }
+    for attempt in range(2):
+        try:
+            with httpx.Client(timeout=30, trust_env=False) as c:
+                r = c.post(config.PUBLIC_API_URL, json=body,
+                           headers={"Authorization": f"Bearer {config.PUBLIC_API_KEY}"})
+            r.raise_for_status()
+            payload = r.json()
+            text = payload["choices"][0]["message"]["content"]
+            data = json.loads(text)
+            data.setdefault("schema", "ai.report.v1")
+            data.setdefault("scope", summary["scope"])
+            data.setdefault("scope_id", summary["scope_id"])
+            data.setdefault("period", {"from": summary["from"], "to": summary["to"]})
+            data.setdefault("confidence", "high")
+            usage = payload.get("usage") or {}
+            store.bump("api_tokens", int(usage.get("total_tokens", 0)))
+            return data
+        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+            if attempt == 1:
+                return None
+
+
 def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
     body = {
         "model": config.OLLAMA_MODEL,
@@ -193,10 +240,15 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False)
     model = "rules-v1"
     content: dict[str, Any] | None = None
 
-    if config.AI_MODE == "local" and not force_rules:
-        content = _ollama(summary)
-        if content:
-            model = config.OLLAMA_MODEL
+    if not force_rules:
+        if config.AI_MODE == "api":
+            content = _public_api(summary)
+            if content:
+                model = config.PUBLIC_MODEL
+        elif config.AI_MODE == "local":
+            content = _ollama(summary)
+            if content:
+                model = config.OLLAMA_MODEL
     # 模型不可用、输出不合契约、或显式要求 → 规则模板，不允许空报告
     if not content:
         content = _rules(summary)

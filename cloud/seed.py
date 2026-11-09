@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import math
 import random
 from typing import Any
@@ -15,40 +16,45 @@ EDGES = [
     ("edge-home-03", "家庭边节点", ["mt-h-01", "mt-h-02", "mt-h-03"]),
 ]
 
+# module_id 与终端仓一致：80 盆栽环境 / 83 血压 / 129 测试环境 / 130 计数器
 DEVICES = {
-    "mt-3b-01": ("诊室屏 · Pi 3B", "health", ["bp.systolic", "spo2", "weight"]),
-    "mt-a64-02": ("温室无头 · Pine64", "env", ["env.temp", "env.humidity", "env.co2"]),
-    "mt-rk64-03": ("配电无头 · Rock64", "energy", ["energy.load", "energy.pv"]),
-    "mt-g-01": ("苗床探头 · A", "env", ["env.temp", "env.humidity"]),
-    "mt-g-02": ("苗床探头 · B", "env", ["env.temp", "env.co2"]),
-    "mt-g-03": ("灌溉电表", "energy", ["energy.load"]),
-    "mt-h-01": ("起居屏 · Pi 4", "health", ["bp.systolic", "spo2"]),
-    "mt-h-02": ("客厅无头", "env", ["env.temp", "env.humidity"]),
-    "mt-h-03": ("入户电表", "energy", ["energy.load", "energy.pv"]),
+    "mt-3b-01": ("诊室屏 · Pi 3B", "health", [83, 80],
+                 ["systolic", "diastolic", "pulse", "temperature_c", "humidity_rh"]),
+    "mt-a64-02": ("温室无头 · Pine64", "env", [129],
+                  ["temperature_c", "humidity_rh", "light_lux"]),
+    "mt-rk64-03": ("配电无头 · Rock64", "energy", [130],
+                   ["counter_delta", "counter_rate"]),
+    "mt-g-01": ("苗床探头 · A", "env", [129], ["temperature_c", "humidity_rh"]),
+    "mt-g-02": ("苗床探头 · B", "env", [129], ["temperature_c", "light_lux"]),
+    "mt-g-03": ("灌溉电表", "energy", [130], ["counter_delta"]),
+    "mt-h-01": ("起居屏 · Pi 4", "health", [83], ["systolic", "pulse"]),
+    "mt-h-02": ("客厅无头", "env", [129], ["temperature_c", "humidity_rh"]),
+    "mt-h-03": ("入户电表", "energy", [130], ["counter_delta", "counter_rate"]),
 }
 
 BASE = {
-    "bp.systolic": 129.0, "spo2": 97.1, "weight": 68.4,
-    "env.temp": 22.6, "env.humidity": 53.0, "env.co2": 640.0,
-    "energy.load": 1.35, "energy.pv": 2.4,
+    "systolic": 128.0, "diastolic": 78.5, "pulse": 71.0,
+    "temperature_c": 23.2, "humidity_rh": 55.0, "light_lux": 16000.0,
+    "counter_delta": 12.0, "counter_rate": 2.4,
 }
 TREND = {  # 每天的整体漂移，让三条边走势不同
-    "bp.systolic": 0.55, "spo2": -0.06, "weight": -0.03,
-    "env.temp": 0.12, "env.humidity": -0.4, "env.co2": 6.0,
-    "energy.load": 0.03, "energy.pv": -0.06,
+    "systolic": 0.55, "diastolic": 0.22, "pulse": -0.08,
+    "temperature_c": 0.12, "humidity_rh": -0.4, "light_lux": -120.0,
+    "counter_delta": 0.18, "counter_rate": 0.03,
 }
 
 ADVICE = [
     ("近 7 天收缩压缓慢上升，建议复测并关注晨间读数", "watch", 0.72),
     ("收缩压连续三个窗口高于基线，建议复测并与医生确认", "alert", 0.81),
-    ("血氧平稳，未见连续偏低", "info", 0.78),
-    ("午后 CO₂ 连续偏高，建议换气通风", "watch", 0.69),
-    ("CO₂ 出现尖峰，与人员集中时段吻合", "alert", 0.74),
-    ("相对湿度偏高，建议通风降低结露风险", "watch", 0.61),
-    ("室内温度日间波动较大，注意结露风险", "watch", 0.64),
-    ("用电负荷尖峰前移，峰谷差扩大", "watch", 0.63),
-    ("光伏午间出力回落，较昨日低 0.4 kW", "watch", 0.6),
-    ("体重一周内变化在正常范围，趋势平稳", "info", 0.7),
+    ("脉搏与血压同步平稳，未见异常", "info", 0.78),
+    ("舒张压夜间低于基线，建议关注睡眠时长", "watch", 0.63),
+    ("温室内温度偏高，建议开启通风", "watch", 0.69),
+    ("光照低于生长区间，建议补光", "watch", 0.66),
+    ("环境湿度不足，建议补水并观察叶片", "watch", 0.67),
+    ("温湿度平稳，处于适宜区间", "info", 0.8),
+    ("计数速率出现尖峰，与晚间时段吻合", "alert", 0.74),
+    ("夜间计数速率偏高，建议核对用电设备", "watch", 0.62),
+    ("计数增量平稳，未见异常尖峰", "info", 0.77),
 ]
 
 LEXICON = ["收缩压", "血氧", "晨间", "复测", "基线", "连续偏高", "波动", "室内温度",
@@ -84,17 +90,17 @@ def generate(days: int = 14) -> dict[str, int]:
                 (edge_id, edge_name, hashlib.sha256(edge_id.encode()).hexdigest()[:16],
                  store.now_ms(), "1.0.0"))
             for d in devs:
-                name, scene, metrics = DEVICES[d]
+                name, scene, modules, _metrics = DEVICES[d]
                 conn.execute(
                     """INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen, online)
                        VALUES(?,?,?,?,?,1)""",
-                    (d, edge_id, scene, "[]", store.now_ms()))
+                    (d, edge_id, scene, json.dumps(modules), store.now_ms()))
 
         for day_index in range(days):
             day = (today - dt.timedelta(days=days - 1 - day_index)).isoformat()
             weekday = dt.date.fromisoformat(day).weekday()
             for d in devs:
-                _name, scene, metrics = DEVICES[d]
+                _name, scene, _modules, metrics = DEVICES[d]
                 # 少量缺报：完整率不会永远是 100%
                 if random.Random(f"gap|{d}|{day}").random() < 0.004:
                     continue
@@ -107,7 +113,7 @@ def generate(days: int = 14) -> dict[str, int]:
                     drift = TREND[metric] * day_index
                     weekly = 1.0 + (0.04 if weekday >= 5 and scene != "health" else 0)
                     value = (BASE[metric] + drift) * weekly + r.gauss(0, BASE[metric] * 0.012)
-                    if metric == "energy.pv":
+                    if metric in ("light_lux", "counter_delta", "counter_rate"):
                         value = max(0.2, value)
                     z = r.gauss(0, 0.6)
                     if r.random() < 0.03:

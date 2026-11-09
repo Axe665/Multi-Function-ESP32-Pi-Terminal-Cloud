@@ -28,9 +28,17 @@ RETENTION_DAYS = int(_env("CLOUD_RETENTION_DAYS", "730"))
 # 模式 B（默认）：本地 Ollama；模式 A：公有 API，默认关。
 AI_MODE = _env("CLOUD_AI_MODE", "local")
 OLLAMA_URL = _env("CLOUD_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = _env("CLOUD_OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+OLLAMA_MODEL = _env("CLOUD_OLLAMA_MODEL", "qwen3.5")
 PUBLIC_API_KEY = _env("CLOUD_PUBLIC_API_KEY")
 PUBLIC_API_URL = _env("CLOUD_PUBLIC_API_URL", "")
+PUBLIC_MODEL = _env("CLOUD_PUBLIC_MODEL", "qwen3.5")
+# 模式 A 的月度预算（token），超了就自动退回规则模板
+API_BUDGET_TOKENS = int(_env("CLOUD_API_BUDGET_TOKENS", "200000"))
+
+# 管理员登录：口令 + TOTP。都不设就是本机演示模式。
+ADMIN_PASSWORD = _env("CLOUD_ADMIN_PASSWORD")
+ADMIN_TOTP = _env("CLOUD_ADMIN_TOTP")
+SESSION_KEY = _env("CLOUD_SESSION_KEY")
 
 
 def ensure_dirs() -> None:

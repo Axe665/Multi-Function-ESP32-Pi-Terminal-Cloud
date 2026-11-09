@@ -1,12 +1,13 @@
 """云入口：python3 -m cloud.main 或 uvicorn cloud.main:app。"""
 from __future__ import annotations
 
+import contextlib
 import os
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import api, config, store
+from . import api, auth, config, scheduler, store
 
 DESCRIPTION = """\
 私有云：接收边节点上报的日聚合与建议文本，做跨边对比、AI 解读与隐私审计。
@@ -16,14 +17,23 @@ DESCRIPTION = """\
 """
 
 
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler.scheduler.start()
+    if auth.required() and not config.ADMIN_TOTP:
+        print(f"auth: 已启用口令登录但没有 TOTP；生成密钥：{auth.secret_hint()}", flush=True)
+    yield
+    await scheduler.scheduler.stop()
+
+
 def create_app() -> FastAPI:
     store.init_db()
-    if os.environ.get("CLOUD_AUTOSEED") == "1":
+    if os.environ.get("CLOUD_AUTOSEED") == "1" and not store.edges():
         from . import seed
-        if not store.edges():
-            seed.generate(14)
+        seed.generate(14)
     app = FastAPI(title="Modular Terminal Cloud", version="1.0.0",
-                  description=DESCRIPTION, docs_url="/api/docs", redoc_url=None)
+                  description=DESCRIPTION, docs_url="/api/docs", redoc_url=None,
+                  lifespan=lifespan)
     app.include_router(api.router)
     app.mount("/", StaticFiles(directory=config.STATIC, html=True), name="static")
     return app

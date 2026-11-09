@@ -1,6 +1,7 @@
 /* 云前端：原生 ES 模块，无构建步骤。 */
 
 import { lines, barList, fmtNum, fmtDay, SERIES_COLORS } from "./charts.js";
+import { createConstellation } from "./constellation.js";
 
 const main = document.getElementById("main");
 let META = null;
@@ -144,6 +145,29 @@ async function viewOverview() {
         <div class="kpi-note">最小 k 见 ${o.k_min_seen || "—"}</div></div>
     </div>
 
+    <div class="row">
+      <section class="panel band">
+        <div class="panel-head">
+          <h2>全网拓扑</h2>
+          <span class="meta">本机在中心 · ${o.edges_total} 个边 · ${o.devices_total} 台设备</span>
+        </div>
+        <div class="band-split">
+          <div class="band-canvas"><canvas id="topology" aria-label="全网拓扑：本机在中心，三个边节点围绕，设备挂在各自的边上"></canvas></div>
+          <div class="band-legend">
+            <div class="list">
+              ${o.edges.map((e) => `<div class="list-row">
+                <span class="dot ${e.online_devices ? "on" : ""}" aria-hidden="true"></span>
+                <div class="grow"><div class="row-text">${esc(e.name)}</div>
+                  <div class="row-sub">${esc(e.edge_id)} · ${e.devices} 台设备</div></div>
+                <div class="row-time">${e.online_devices}/${e.devices}</div>
+              </div>`).join("")}
+            </div>
+            <p class="hint" style="margin:12px 0 0">中心是本机；每条连线是一份 edge-report 的来路。</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <div class="row">${aiBlock}</div>
 
     <div class="row split" style="align-items:stretch">
@@ -161,6 +185,12 @@ async function viewOverview() {
         </table>
       </section>
     </div>`;
+
+  const topo = createConstellation(document.getElementById("topology"));
+  topo.setData({
+    edges: o.edges.map((e) => ({ id: e.edge_id, devices: e.devices, online: e.online_devices > 0 })),
+    alerts: o.alerts_total,
+  });
 
   barList(document.getElementById("alerts"),
     o.alerts_top.map((a) => ({ label: a.text, value: a.count, note: a.edge })),
@@ -657,6 +687,58 @@ async function viewPrivacy() {
     </div>`;
 }
 
+/* ---------------------------------------------------------------- 登录 */
+
+function renderLogin(state) {
+  document.querySelectorAll(".nav a").forEach((a) => a.removeAttribute("aria-current"));
+  document.getElementById("side-foot").innerHTML = "";
+  main.innerHTML = `
+    <div class="login">
+      <div class="login-card">
+        <h1>登录云节点</h1>
+        <p class="sub">${esc(META?.cloud_name || "私有云")} · 单租户管理台</p>
+        <form id="login-form" style="margin-top:22px">
+          <div class="field">
+            <label for="pw">管理员口令</label>
+            <input class="control" id="pw" type="password" autocomplete="current-password" required>
+          </div>
+          ${state.totp ? `<div class="field" style="margin-top:14px">
+            <label for="code">动态码（6 位）</label>
+            <input class="control" id="code" inputmode="numeric" pattern="[0-9]{6}"
+                   autocomplete="one-time-code" required>
+            <span class="hint">验证器 App 里的 30 秒动态码。</span>
+          </div>` : ""}
+          <div id="login-error" class="error-box" style="display:none;margin-top:16px"></div>
+          <button class="btn btn-primary" type="submit" style="margin-top:20px;width:100%;justify-content:center">
+            进入管理台
+          </button>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("login-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector("button");
+    btn.disabled = true;
+    try {
+      await api("/api/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          password: document.getElementById("pw").value,
+          code: document.getElementById("code")?.value || "",
+        }),
+      });
+      route(true);
+    } catch (e) {
+      const box = document.getElementById("login-error");
+      box.style.display = "flex";
+      box.textContent = e.message;
+      btn.disabled = false;
+    }
+  };
+  document.getElementById("pw")?.focus();
+}
+
 /* ---------------------------------------------------------------- 路由 */
 
 const routes = [
@@ -692,5 +774,19 @@ async function route(quiet = false) {
   }
 }
 
-window.addEventListener("hashchange", () => route());
-route();
+async function boot() {
+  try {
+    await ensureMeta().catch(() => {});
+    const s = await api("/api/v1/auth/state");
+    if (s.required && !s.authed) {
+      renderLogin(s);
+      return;
+    }
+  } catch { /* 读不到状态就让路由自己报错 */ }
+  route();
+}
+window.addEventListener("hashchange", () => {
+  if (document.querySelector(".login")) return;
+  route();
+});
+boot();

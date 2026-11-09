@@ -4,18 +4,24 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
-from . import ai, config, models, store
+from . import ai, auth, config, models, scheduler, store
 
 router = APIRouter(prefix="/api/v1")
 
 
-def admin_guard(authorization: str | None = Header(default=None)) -> None:
-    if not config.ADMIN_TOKEN:
+def admin_guard(request: Request,
+                authorization: str | None = Header(default=None)) -> None:
+    """三种放行：bearer 令牌、登录会话、或本机演示（两个都没配）。"""
+    if config.ADMIN_TOKEN and authorization == f"Bearer {config.ADMIN_TOKEN}":
         return
-    if authorization != f"Bearer {config.ADMIN_TOKEN}":
+    if auth.required():
+        if auth.check_session(request.cookies.get(auth.COOKIE)):
+            return
+        raise HTTPException(401, "需要登录")
+    if config.ADMIN_TOKEN:
         raise HTTPException(401, "需要管理员令牌")
 
 
@@ -41,6 +47,27 @@ def _raw_hits(node: Any, path: str = "") -> list[str]:
         for i, v in enumerate(node):
             hits += _raw_hits(v, f"{path}[{i}]")
     return hits
+
+
+@router.get("/auth/state")
+def auth_state(request: Request) -> dict[str, Any]:
+    return auth.state(request.cookies.get(auth.COOKIE))
+
+
+@router.post("/auth/login")
+def auth_login(body: dict[str, Any], response: Response) -> dict[str, Any]:
+    result = auth.login(str(body.get("password", "")), str(body.get("code", "")))
+    if not result["ok"]:
+        raise HTTPException(401, result["error"])
+    response.set_cookie(auth.COOKIE, result["token"], httponly=True, samesite="lax",
+                        max_age=auth.SESSION_TTL, path="/")
+    return {"ok": True}
+
+
+@router.post("/auth/logout")
+def auth_logout(response: Response) -> dict[str, Any]:
+    response.delete_cookie(auth.COOKIE, path="/")
+    return {"ok": True}
 
 
 @router.post("/ingest/edge-report")
@@ -268,7 +295,7 @@ def privacy_audit() -> dict[str, Any]:
     }
 
 
-@router.get("/health", dependencies=admin)
+@router.get("/health")
 def health() -> dict[str, Any]:
     try:
         with store.connect() as conn:
@@ -284,4 +311,8 @@ def health() -> dict[str, Any]:
         "ollama": config.OLLAMA_URL if config.AI_MODE == "local" else None,
         "edges": len(store.edges()), "devices": len(store.devices()),
         "ingested_rows": store.counters().get("rows_ingested", 0),
+        "auth_required": auth.required(),
+        "api_tokens_used": store.counters().get("api_tokens", 0),
+        "api_budget": config.API_BUDGET_TOKENS,
+        "scheduler": {"ticks": scheduler.scheduler.ticks, "last": scheduler.scheduler.last},
     }
