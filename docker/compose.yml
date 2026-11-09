@@ -13,6 +13,8 @@ x-cloud: &cloud
     CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
     CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
     CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
+    # 空库首次启动自动写 14 天演示数据
+    CLOUD_AUTOSEED: "1"
     CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
     CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
     TZ: Asia/Shanghai
