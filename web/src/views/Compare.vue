@@ -3,13 +3,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { api, fmtNum, fmtDay } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import ChartBox from '../components/ChartBox.vue'
+import { chartTokens, useTheme } from '../lib/theme'
 
 const meta = ref({ metrics: [] })
 const metric = ref('')
 const data = ref(null)
 const error = ref('')
-
-const palette = ['#386a20', '#38656a', '#7a5900', '#8c4a5f', '#4a5b8c', '#5d6b3a']
+const { theme } = useTheme()
+const tk = computed(() => chartTokens(theme.value))
 
 async function loadMeta() {
   meta.value = await api('/meta')
@@ -34,21 +35,22 @@ watch(metric, loadCompare)
 const option = computed(() => {
   const edges = data.value?.edges || []
   return {
-    color: palette,
+    color: tk.value.palette,
     grid: { left: 8, right: 12, top: 30, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },
-    legend: { top: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } },
+    legend: { top: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10,
+              textStyle: { fontSize: 11, color: tk.value.axis } },
     xAxis: {
       type: 'category',
       data: data.value?.days || [],
-      axisLabel: { formatter: (v) => fmtDay(v), fontSize: 11 },
-      axisLine: { lineStyle: { color: '#c3c8bb' } },
+      axisLabel: { formatter: (v) => fmtDay(v), fontSize: 11, color: tk.value.axis },
+      axisLine: { lineStyle: { color: tk.value.split } },
     },
     yAxis: {
       type: 'value',
       scale: true,
-      splitLine: { lineStyle: { color: '#e3e6dc' } },
-      axisLabel: { fontSize: 11 },
+      splitLine: { lineStyle: { color: tk.value.split } },
+      axisLabel: { fontSize: 11, color: tk.value.axis },
     },
     series: edges.map((e) => ({
       name: e.name,

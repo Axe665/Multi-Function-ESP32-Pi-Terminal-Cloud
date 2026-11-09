@@ -174,6 +174,10 @@ const kpis = computed(() => {
 .lg--edge { background: #0f6b38; }
 .lg--sat { background: #858c85; }
 .lg--off { background: #b9c0b9; }
+[data-theme='dark'] .lg--center { background: #ebf5e4; }
+[data-theme='dark'] .lg--edge { background: #85db9e; }
+[data-theme='dark'] .lg--sat { background: #9eada1; }
+[data-theme='dark'] .lg--off { background: #4a514c; }
 .topo-note { margin-left: auto; }
 .trio {
   display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.9fr);

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { api, fmtDay, fmtTime } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import ChartBox from '../components/ChartBox.vue'
+import { chartTokens, useTheme } from '../lib/theme'
 import 'echarts-wordcloud'
 
 const route = useRoute()
@@ -15,6 +16,8 @@ const heat = ref(null)
 const words = ref([])
 const advice = ref([])
 const error = ref('')
+const { theme } = useTheme()
+const tk = computed(() => chartTokens(theme.value))
 
 const id = computed(() => route.params.id)
 
@@ -59,18 +62,18 @@ const seriesOption = computed(() => {
     xAxis: {
       type: 'category',
       data: pts.map((p) => fmtDay(p.day)),
-      axisLine: { lineStyle: { color: '#c3c8bb' } },
-      axisLabel: { fontSize: 11 },
+      axisLine: { lineStyle: { color: tk.value.split } },
+      axisLabel: { fontSize: 11, color: tk.value.axis },
     },
     yAxis: {
       type: 'value', scale: true,
-      splitLine: { lineStyle: { color: '#e3e6dc' } },
-      axisLabel: { fontSize: 11 },
+      splitLine: { lineStyle: { color: tk.value.split } },
+      axisLabel: { fontSize: 11, color: tk.value.axis },
     },
     series: [{
       type: 'line', smooth: true, symbol: 'none',
-      lineStyle: { width: 2, color: '#386a20' },
-      areaStyle: { color: 'rgba(56,106,32,0.10)' },
+      lineStyle: { width: 2, color: tk.value.line },
+      areaStyle: { color: tk.value.area },
       data: pts.map((p) => p.mean),
     }],
   }
@@ -86,29 +89,40 @@ const heatOption = computed(() => {
   return {
     grid: { left: 8, right: 8, top: 8, bottom: 32, containLabel: true },
     tooltip: { formatter: (p) => `${fmtDay(cells[p.value[0]]?.day)}<br/>${p.value[2]} ${unit(metric.value)}` },
-    xAxis: { type: 'category', data: cells.map((c) => fmtDay(c.day)), axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'category', data: [label(metric.value)], axisLabel: { fontSize: 11 } },
+    xAxis: { type: 'category', data: cells.map((c) => fmtDay(c.day)),
+             axisLine: { lineStyle: { color: tk.value.split } },
+             axisLabel: { fontSize: 11, color: tk.value.axis } },
+    yAxis: { type: 'category', data: [label(metric.value)],
+             axisLabel: { fontSize: 11, color: tk.value.axis } },
     visualMap: {
       min: lo, max: hi, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
-      inRange: { color: ['#e3e6dc', '#9cd67e', '#386a20'] },
-      textStyle: { fontSize: 10 },
+      inRange: { color: tk.value.heat },
+      textStyle: { fontSize: 10, color: tk.value.axis },
     },
-    series: [{ type: 'heatmap', data, itemStyle: { borderColor: '#fbfdf6', borderWidth: 1 } }],
+    series: [{ type: 'heatmap', data, itemStyle: { borderColor: tk.value.border, borderWidth: 1 } }],
   }
 })
 
-const wordOption = computed(() => ({
-  tooltip: { formatter: (p) => `${p.name}：${p.value}` },
-  series: [{
-    type: 'wordCloud', shape: 'square', left: 0, top: 0, right: 0, bottom: 0,
-    sizeRange: [14, 40], rotationRange: [0, 0],
-    textStyle: {
-      fontFamily: 'Roboto, Noto Sans SC, sans-serif',
-      color: () => `hsl(${112 + Math.random() * 34}, ${38 + Math.random() * 18}%, ${24 + Math.random() * 12}%)`,
-    },
-    data: words.value.slice(0, 40).map((w) => ({ name: w.word, value: w.count })),
-  }],
-}))
+const wordOption = computed(() => {
+  const word = tk.value.word
+  return {
+    tooltip: { formatter: (p) => `${p.name}：${p.value}` },
+    series: [{
+      type: 'wordCloud', shape: 'square', left: 0, top: 0, right: 0, bottom: 0,
+      sizeRange: [15, 38], rotationRange: [0, 0],
+      textStyle: {
+        fontFamily: 'Roboto, Noto Sans SC, sans-serif',
+        fontWeight: 500,
+        color: () => {
+          const [s0, s1] = word.sat
+          const [l0, l1] = word.light
+          return `hsl(${112 + Math.random() * 34}, ${s0 + Math.random() * (s1 - s0)}%, ${l0 + Math.random() * (l1 - l0)}%)`
+        },
+      },
+      data: words.value.slice(0, 40).map((w) => ({ name: w.word, value: w.count })),
+    }],
+  }
+})
 </script>
 
 <template>

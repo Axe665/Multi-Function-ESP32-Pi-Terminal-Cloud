@@ -7,7 +7,7 @@
 
 ## 每个页面回答一个问题
 
-前端与边仓同一套：Vue 3 + Vite + ECharts，自写 Material 3 token，亮色默认可切暗色。
+前端与边仓同一套：Vue 3 + Vite + ECharts，自写 Material 3 token，亮色默认可切暗色；ECharts 与拓扑图跟随换主题。
 
 | 页面 | 它回答的问题 | 关键内容 |
 |---|---|---|
