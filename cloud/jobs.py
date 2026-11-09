@@ -22,9 +22,12 @@ from . import config, queue, store
 
 
 def generate_report(scope: str, scope_id: str | None = None,
-                    task: str = "weekly_narrative", mode: str | None = None) -> dict[str, Any]:
+                    task: str = "weekly_narrative", mode: str | None = None,
+                    period: list[str] | None = None) -> dict[str, Any]:
     from . import ai, store as _store
-    out = ai.generate(scope, scope_id, force_rules=(mode or config.AI_MODE) == "rules", task=task)
+    rng = (period[0], period[1]) if period else None
+    out = ai.generate(scope, scope_id, force_rules=(mode or config.AI_MODE) == "rules",
+                      task=task, period=rng)
     _store.audit("admin", "export.report", f"report:{out['id']}",
                  {"model": out["model"], "scope": scope})
     return out
@@ -147,14 +150,18 @@ def run_restore_drill() -> dict[str, Any]:
 
 def prune(retention_days: int | None = None) -> dict[str, int]:
     days = retention_days or config.RETENTION_DAYS
+    text_days = config.TEXT_RETENTION_DAYS
     today = dt.date.today()
     cutoff_day = (today - dt.timedelta(days=days)).isoformat()
+    text_day = (today - dt.timedelta(days=text_days)).isoformat()
     cutoff_ms = store.now_ms() - days * 86_400_000
+    text_ms = store.now_ms() - text_days * 86_400_000
     cutoff = dt.datetime.fromtimestamp(cutoff_ms / 1000.0, tz=dt.timezone.utc)
+    text_cutoff = dt.datetime.fromtimestamp(text_ms / 1000.0, tz=dt.timezone.utc)
     with store.connect() as conn:
         daily = conn.execute("DELETE FROM telemetry_daily WHERE day < %s", (cutoff_day,)).rowcount
-        adv = conn.execute("DELETE FROM advice WHERE created_at < %s", (cutoff,)).rowcount
-        words = conn.execute("DELETE FROM word_freq WHERE day < %s", (cutoff_day,)).rowcount
+        adv = conn.execute("DELETE FROM advice WHERE created_at < %s", (text_cutoff,)).rowcount
+        words = conn.execute("DELETE FROM word_freq WHERE day < %s", (text_day,)).rowcount
         reports = conn.execute("DELETE FROM reports WHERE received_at < %s", (cutoff,)).rowcount
     if daily or adv or words:
         store.audit("system", "retention.prune", "cloud",

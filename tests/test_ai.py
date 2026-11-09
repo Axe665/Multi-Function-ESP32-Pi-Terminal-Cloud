@@ -41,6 +41,12 @@ class AiReportTest(unittest.TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertTrue(second.get("cached"))
 
+    def test_explicit_period_is_respected(self):
+        out = ai.generate("fleet", None, force_rules=True,
+                          period=("2026-01-01", "2026-01-03"))
+        self.assertEqual(out["content"]["period"]["from"], "2026-01-01")
+        self.assertEqual(out["content"]["period"]["to"], "2026-01-03")
+
     def test_report_needs_data(self):
         # 一个没有数据的设备也必须有报告，不允许返回空
         out = ai.generate("device", "no-such-device", force_rules=True)

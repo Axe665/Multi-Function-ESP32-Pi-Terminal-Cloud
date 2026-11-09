@@ -107,7 +107,7 @@ class PublicApiTest(unittest.TestCase):
         _Handler.fail = True
         out = ai.generate("fleet", None)
         self.assertEqual(out["model"], "rules-v1")
-        self.assertEqual(_Handler.calls, 2)  # 重试一次后放弃
+        self.assertEqual(_Handler.calls, 3)  # 首次 + 重试 2 次后落规则模板（文档 §6.3）
 
     def test_rules_mode_never_calls_out(self):
         config.AI_MODE = "rules"

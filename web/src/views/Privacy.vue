@@ -40,6 +40,7 @@ const kRows = computed(() => {
     <div class="kpi"><div class="label">被抑制的桶</div><div class="value">{{ fmtNum(audit.suppressed_buckets, 0) }}</div><div class="note">k&lt;5，从未离开端</div></div>
     <div class="kpi"><div class="label">原始字段拦截</div><div class="value">{{ audit.raw_rejected }}</div><div class="note">摄取时直接 422</div></div>
     <div class="kpi"><div class="label">已入库行</div><div class="value">{{ fmtNum(audit.rows_ingested, 0) }}</div><div class="note">全部是日聚合</div></div>
+    <div class="kpi"><div class="label">导出记录</div><div class="value">{{ audit.exports?.length || 0 }}</div><div class="note">报告导出全部留痕</div></div>
   </section>
 
   <div class="duo">
@@ -85,6 +86,22 @@ const kRows = computed(() => {
 
   <section class="md-card log">
     <div class="section-head">
+      <h2>导出记录</h2>
+      <span class="md-muted">{{ audit?.exports?.length || 0 }} 条</span>
+    </div>
+    <table class="md-table">
+      <thead><tr><th>时间</th><th>动作</th><th>对象</th></tr></thead>
+      <tbody>
+        <tr v-for="a in audit?.exports || []" :key="'x' + a.id">
+          <td class="md-mono">{{ fmtTime(a.created_at, true) }}</td>
+          <td>{{ a.action }}</td>
+          <td class="md-mono">{{ a.target }}</td>
+        </tr>
+        <tr v-if="!audit?.exports?.length"><td colspan="3" class="md-muted">还没有导出记录。</td></tr>
+      </tbody>
+    </table>
+
+    <div class="section-head log-head">
       <h2>审计日志</h2>
       <span class="md-muted">最近 {{ audit?.audit?.length || 0 }} 条</span>
     </div>
@@ -129,5 +146,6 @@ const kRows = computed(() => {
 .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
 .small { font: var(--md-body-small); }
 .log { margin-top: var(--space-4); }
+.log-head { margin-top: var(--space-5); }
 .detail { max-width: 420px; overflow-wrap: anywhere; }
 </style>

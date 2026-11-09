@@ -38,6 +38,28 @@ async function open(id) {
   detail.value = await api(`/ai/reports/${id}`).catch(() => null)
 }
 
+async function regenerate() {
+  if (!detail.value) return
+  busy.value = true
+  try {
+    await api('/ai/reports', {
+      method: 'POST',
+      body: {
+        scope: detail.value.scope,
+        scope_id: detail.value.scope_id || undefined,
+        task: detail.value.task || 'weekly_narrative',
+        period: { from: detail.value.period_start, to: detail.value.period_end },
+      },
+    })
+    toast('已按原区间重新生成')
+    await load()
+  } catch (e) {
+    toast(`生成失败：${e.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function generate() {
   busy.value = true
   try {
@@ -117,6 +139,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
             {{ scopeLabel[detail.scope] || detail.scope }} · {{ detail.model }} ·
             {{ fmtDay(detail.content.period.from) }} – {{ fmtDay(detail.content.period.to) }}
           </span>
+          <button class="md-btn md-btn--text" :disabled="busy" @click="regenerate">按原区间重新生成</button>
           <span class="md-chip" :class="detail.content.confidence === 'high' ? 'md-chip--ok' : 'md-chip--warn'">
             {{ detail.content.confidence === 'high' ? '高置信' : '规则模板' }}
           </span>

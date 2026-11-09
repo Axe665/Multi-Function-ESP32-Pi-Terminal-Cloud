@@ -33,7 +33,18 @@ EDGE_TOKEN = _env("CLOUD_EDGE_TOKEN")
 ADMIN_TOKEN = _env("CLOUD_ADMIN_TOKEN")
 
 K_MIN = int(_env("CLOUD_K_MIN", "5"))
+# L2 聚合保留 2 年；L3 文本（建议/词频/报告）保留 1 年（文档 §8.1）
 RETENTION_DAYS = int(_env("CLOUD_RETENTION_DAYS", "730"))
+TEXT_RETENTION_DAYS = int(_env("CLOUD_TEXT_RETENTION_DAYS", "365"))
+
+# 演示模式：compose 里默认开，UI 会挂「演示模式」横幅（文档 §8.5）
+DEMO = _env("CLOUD_DEMO", "1") != "0"
+BUILD = _env("CLOUD_BUILD", "dev")
+
+# mDNS 广播 _orpi-cloud._tcp（文档 §6.1 / §5.9）
+MDNS_ENABLED = _env("CLOUD_MDNS", "1") != "0"
+MDNS_PORT = int(_env("CLOUD_MDNS_PORT", "8443"))
+CA_CERT = Path(_env("CLOUD_CA_CERT", "/certs/cloud-ca.crt"))
 
 # 模式 B（默认）：本地 Ollama；模式 A：公有 API，默认关。
 AI_MODE = _env("CLOUD_AI_MODE", "local")

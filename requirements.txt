@@ -6,3 +6,5 @@ psycopg[binary]>=3.2
 redis>=5.0
 rq>=2.0
 jieba>=0.42
+
+zeroconf>=0.132

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -14,6 +14,15 @@ const navItems = [
 ]
 
 const active = computed(() => route.path)
+
+// 演示模式横幅：数据由 mock 生成（文档 §8.5）
+const demo = ref(false)
+onMounted(async () => {
+  try {
+    const r = await fetch('/api/v1/health')
+    if (r.ok) demo.value = Boolean((await r.json()).demo)
+  } catch { /* 自检不可达时不挂横幅 */ }
+})
 
 const theme = ref(document.documentElement.dataset.theme || 'light')
 function toggleTheme() {
@@ -53,6 +62,10 @@ function toggleTheme() {
     </aside>
 
     <main class="content" tabindex="-1">
+      <div v-if="demo" class="demo-banner" role="status">
+        <span class="md-chip md-chip--warn">演示模式</span>
+        <span>数据由 mock 生成，不是真实测量。</span>
+      </div>
       <RouterView />
     </main>
   </div>
@@ -132,6 +145,18 @@ function toggleTheme() {
 .content {
   padding: var(--space-5) var(--space-6) var(--space-6);
   min-width: 0;
+}
+
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--md-shape-sm);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font: var(--md-body-small);
 }
 
 @media (max-width: 900px) {

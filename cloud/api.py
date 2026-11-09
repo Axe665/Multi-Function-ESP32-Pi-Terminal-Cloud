@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
-from . import ai, auth, config, models, queue, store
+from . import ai, auth, config, mdns, models, queue, store
 
 router = APIRouter(prefix="/api/v1")
 
@@ -266,8 +266,18 @@ def ai_generate(body: dict[str, Any]) -> dict[str, Any]:
     task = body.get("task", "weekly_narrative")
     if task not in ai.TASKS:
         raise HTTPException(400, f"task 只能是 {'/'.join(ai.TASKS)}")
+    # 文档 §6.5：POST 可带 period（from/to），不传就用最近 7 天
+    period = body.get("period")
+    if period is not None:
+        try:
+            start, end = dt.date.fromisoformat(period["from"]), dt.date.fromisoformat(period["to"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(400, "period 必须是 {from: YYYY-MM-DD, to: YYYY-MM-DD}") from e
+        if start > end:
+            raise HTTPException(400, "period.from 不能晚于 period.to")
+        period = [start.isoformat(), end.isoformat()]
     # 文档 §6.1：AI 报告在 worker 里生成。等不及就返回 job_id，前端再查。
-    out = queue.submit("generate_report", scope, scope_id, task, mode, wait=120)
+    out = queue.submit("generate_report", scope, scope_id, task, mode, period, wait=120)
     if out["status"] == "done":
         return out["result"]
     if out["status"] == "failed":
@@ -314,6 +324,7 @@ def health() -> dict[str, Any]:
         db = "fail"
     return {
         "ok": db == "ok", "cloud_id": config.CLOUD_ID, "db": db,
+        "demo": config.DEMO, "build": config.BUILD,
         "edge_token": "set" if config.EDGE_TOKEN else "open",
         "admin_token": "set" if config.ADMIN_TOKEN else "open",
         "ai_mode": config.AI_MODE,
@@ -324,4 +335,5 @@ def health() -> dict[str, Any]:
         "api_tokens_used": store.counters().get("api_tokens", 0),
         "api_budget": config.API_BUDGET_TOKENS,
         "queue": queue.stats(),
+        "mdns": mdns.mdns.status(),
     }

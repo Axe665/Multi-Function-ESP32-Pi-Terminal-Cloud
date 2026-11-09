@@ -12,9 +12,9 @@
 | 页面 | 它回答的问题 | 关键内容 |
 |---|---|---|
 | 总览 | 这一周三条边都健康吗？ | WebGL 三维拓扑、在线数、设备日完整率、本周 AI 摘要、告警 Top5 |
-| 边与设备 | 问题出在哪个边、哪台设备？ | 两级下钻：边 → 设备 → 日聚合趋势与明细 |
+| 边与设备 | 问题出在哪个边、哪台设备？ | 两级下钻：点边筛设备，点设备进详情（趋势/日热力/词云/建议流） |
 | 对比 | 谁跑得不一样？ | 同指标跨边指数（首日 = 100）、末日指数与变化 |
-| AI 报告 | 机器怎么看这一周？ | 报告列表、findings、动作、模型与 token |
+| AI 报告 | 机器怎么看这一周？ | 报告列表、findings、动作、模型与 token；可按原区间重新生成 |
 | 隐私审计 | 云到底拿到了什么？ | k 值分布、被抑制桶数、原始字段拦截、字段白名单、审计日志 |
 
 ## 快速开始
@@ -81,10 +81,12 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 | 报告缓存 | 同 scope + 周期 + 输入摘要 24 h 内复用 | `tests/test_ai.py` |
 | 词云 | jieba 分词 + 停用词 | `cloud/ai.py`、线上页面 |
 | 动态指标字典 | 标签/单位跟着上报走，不写死 | `/api/v1/meta` |
-| 保留期清理 | 日聚合 / 建议 / 词频 / 收件记录按天删 | `cloud/scheduler.py` |
+| 保留期清理 | L2 日聚合 2 年、L3 文本（建议/词频/报告）1 年，按天删 | `cloud/jobs.py` |
 | 每日全网报告 | 24 h 没有新报告就补一份 | 同上 |
 | 隐私审计 | k 分布、抑制计数、拦截计数、字段白名单、导出留痕 | `tests/test_ingest.py` |
-| 公网最小暴露 | 只有 `/ingest/edge-report` 与 `/health` 不要求登录 | `docker/Caddyfile` |
+| 公网最小暴露 | 只有 `/ingest/edge-report` 与 `/health` 不要求登录；`/ollama/*` 只在内网站点 | `docker/Caddyfile` |
+| mDNS 广播 | 云广播 `_orpi-cloud._tcp`（v/id/port/ca_fp），边据此发现云 | `cloud/mdns.py`，容器内实测 `on: true` |
+| 演示模式 | `demo` 与构建号随 `/health` 暴露，前端挂横幅；seed 写审计 | `cloud/seed.py`、`cloud/api.py` |
 
 ## 隐私边界
 
@@ -126,11 +128,11 @@ python3 -m unittest discover -s tests -t . -v
 
 | 文档条目 | 要求 | 现状 |
 |---|---|---|
-| §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama | ✅ `docker/compose.yml` 七个服务；主库 Postgres 16，队列 Redis 7 + RQ，worker 跑 AI 报告/词频/跨边聚合 |
+| §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
-| §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败落规则模板 | ✅ 四种任务（weekly_narrative / fleet_compare / advice_digest / wordcloud_label）都有规则实现，JSON 不过关就退回模板 |
-| §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计；Vue3 + Vite + ECharts，自写 M3 token |
-| §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现，另加 meta/compare/daily/auth |
+| §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`，不留空报告 |
+| §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/日热力/词云/建议流）；Vue3 + Vite + ECharts，自写 M3 token |
+| §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
 | §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |

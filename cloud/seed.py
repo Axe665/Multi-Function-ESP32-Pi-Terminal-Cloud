@@ -137,10 +137,14 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
         conn.execute("INSERT INTO counters(key, value) VALUES('suppressed_buckets', %s)",
                      (suppressed * 12,))
 
-    from . import ai
+    from . import ai, config
     for scope, sid in [("edge", "edge-lab-01"), ("edge", "edge-green-02"), ("fleet", None)]:
         ai.generate(scope, sid, force_rules=True)
 
+    # 文档 §8.3/§8.5：演示环境初始化要写审计（时间、操作者、构建号）
+    store.audit("system", "seed.demo", "cloud",
+                {"operator": "seed", "build": config.BUILD, "days": days,
+                 "rows": rows, "advice": adv_rows})
     return {"rows": rows, "advice": adv_rows, "words": len(words),
             "days": days, "suppressed": suppressed}
 

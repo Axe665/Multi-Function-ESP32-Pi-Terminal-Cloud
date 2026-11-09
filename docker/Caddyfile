@@ -14,6 +14,10 @@ http://:8088 {
 {$CLOUD_DOMAIN:localhost} {
 	tls /certs/cloud.crt /certs/cloud.key
 
+	# 本地模型的统一入口（文档 §6.1，仅内网；ollama profile 没起时 502）
+	handle /ollama/* {
+		reverse_proxy ollama:11434
+	}
 	# 管理 API 与前端（内网）
 	handle /api/* {
 		reverse_proxy api:8002

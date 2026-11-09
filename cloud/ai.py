@@ -58,11 +58,12 @@ def _clip(summary: dict[str, Any], max_tokens: int = 8000) -> dict[str, Any]:
     return out
 
 
-def _summary(scope: str, scope_id: str | None, days: int = 7) -> dict[str, Any]:
+def _summary(scope: str, scope_id: str | None, days: int = 7,
+             period: tuple[str, str] | None = None) -> dict[str, Any]:
     """给模型（或规则）看的输入摘要：只有聚合，没有原始值。"""
-    start, end = _window(days)
+    start, end = period if period else _window(days)
     rows = store.daily_rows(4000, scope_id if scope == "edge" else None)
-    rows = [r for r in rows if r["day"] >= start]
+    rows = [r for r in rows if start <= r["day"] <= end]
     if scope == "device" and scope_id:
         rows = [r for r in rows if r["device_id"] == scope_id]
 
@@ -313,7 +314,7 @@ def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
         "max_tokens": 800,
         "temperature": 0.2,
     }
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             with httpx.Client(timeout=30, trust_env=False) as c:
                 r = c.post(config.PUBLIC_API_URL, json=body,
@@ -331,7 +332,7 @@ def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
             store.bump("api_tokens", int(usage.get("total_tokens", 0)))
             return data
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
-            if attempt == 1:
+            if attempt == 2:
                 return None
 
 
@@ -343,7 +344,7 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
         "format": "json",
         "options": {"num_ctx": 4096, "temperature": 0.2},
     }
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             with httpx.Client(timeout=30, trust_env=False) as c:
                 r = c.post(f"{config.OLLAMA_URL}/api/generate", json=body)
@@ -357,15 +358,16 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
             data.setdefault("task", task)
             return data
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
-            if attempt == 1:
+            if attempt == 2:
                 return None
 
 
 def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
-             task: str = "weekly_narrative") -> dict[str, Any]:
+             task: str = "weekly_narrative",
+             period: tuple[str, str] | None = None) -> dict[str, Any]:
     if task not in TASKS:
         task = "weekly_narrative"
-    summary = _summary(scope, scope_id)
+    summary = _summary(scope, scope_id, period=period)
     summary["task"] = task
     summary = _clip(summary)
     ph = prompt_hash(summary, task)
