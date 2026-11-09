@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS telemetry_daily (
   slope     REAL NOT NULL,
   z         REAL NOT NULL,
   k         INTEGER NOT NULL,
+  module_id INTEGER DEFAULT 0,
+  label     TEXT,
+  unit      TEXT,
+  table_name TEXT,
   PRIMARY KEY (edge_id, device_id, day, metric)
 );
 CREATE INDEX IF NOT EXISTS ix_daily_metric ON telemetry_daily(metric, day);
@@ -121,6 +125,11 @@ def connect():
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(telemetry_daily)")}
+        for name, decl in (("module_id", "INTEGER DEFAULT 0"), ("label", "TEXT"),
+                           ("unit", "TEXT"), ("table_name", "TEXT")):
+            if name not in cols:
+                conn.execute(f"ALTER TABLE telemetry_daily ADD COLUMN {name} {decl}")
 
 
 def bump(key: str, n: int = 1) -> None:
@@ -171,13 +180,20 @@ def ingest_report(payload: dict[str, Any]) -> dict[str, Any]:
         for row in payload["telemetry_daily"]:
             conn.execute(
                 """INSERT INTO telemetry_daily
-                   (edge_id, device_id, day, metric, n_subjects, n_samples, mean, slope, z, k)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)
+                   (edge_id, device_id, day, metric, n_subjects, n_samples, mean, slope, z, k,
+                    module_id, label, unit, table_name)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(edge_id, device_id, day, metric) DO UPDATE SET
                      n_subjects=excluded.n_subjects, n_samples=excluded.n_samples,
-                     mean=excluded.mean, slope=excluded.slope, z=excluded.z, k=excluded.k""",
+                     mean=excluded.mean, slope=excluded.slope, z=excluded.z, k=excluded.k,
+                     module_id=excluded.module_id,
+                     label=COALESCE(NULLIF(excluded.label,''), telemetry_daily.label),
+                     unit=COALESCE(NULLIF(excluded.unit,''), telemetry_daily.unit),
+                     table_name=COALESCE(NULLIF(excluded.table_name,''), telemetry_daily.table_name)""",
                 (edge_id, row["device_id"], row["day"], row["metric"], row["n_subjects"],
-                 row["n_samples"], row["mean"], row["slope"], row["z"], row["k"]))
+                 row["n_samples"], row["mean"], row["slope"], row["z"], row["k"],
+                 row.get("module_id", 0), row.get("label", ""), row.get("unit", ""),
+                 row.get("table", "samples")))
         for a in payload["advice"]:
             conn.execute(
                 """INSERT OR IGNORE INTO advice
@@ -246,6 +262,20 @@ def heatmap(edge_id: str, device_id: str, metric: str) -> list[dict[str, Any]]:
             "SELECT day, mean, z FROM telemetry_daily WHERE edge_id=? AND device_id=? AND metric=?",
             (edge_id, device_id, metric)).fetchall()
     return [{"day": r["day"], "mean": r["mean"], "z": r["z"]} for r in rows]
+
+
+def metric_labels() -> list[dict[str, Any]]:
+    """云收到过哪些指标 —— 前端下拉框与 AI 的措辞都从这里来。"""
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT metric,
+                      MAX(COALESCE(NULLIF(label,''), metric)) AS label,
+                      MAX(COALESCE(unit,'')) AS unit,
+                      MIN(COALESCE(module_id,0)) AS module_id,
+                      COUNT(DISTINCT device_id) AS devices,
+                      COUNT(*) AS rows
+               FROM telemetry_daily GROUP BY metric ORDER BY metric""").fetchall()
+    return [dict(r) for r in rows]
 
 
 def daily_rows(limit: int = 200, edge_id: str | None = None) -> list[dict[str, Any]]:

@@ -32,6 +32,11 @@ class DailyAggregate(Strict):
     slope: float
     z: float
     k: int
+    # 端/边带来的元信息；缺失时云端按 metric 名兜底
+    module_id: int = 0
+    label: str = ""
+    unit: str = ""
+    table: str = "samples"
 
 
 class ReportAdvice(Strict):

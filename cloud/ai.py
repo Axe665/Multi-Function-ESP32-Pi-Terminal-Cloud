@@ -23,11 +23,17 @@ LABELS = {
 }
 
 
-def _label(metric: str) -> str:
+def _label(metric: str, catalog: dict | None = None) -> str:
+    row = (catalog or {}).get(metric)
+    if row and row.get("label"):
+        return row["label"]
     return LABELS.get(metric, (metric, ""))[0]
 
 
-def _unit(metric: str) -> str:
+def _unit(metric: str, catalog: dict | None = None) -> str:
+    row = (catalog or {}).get(metric)
+    if row and row.get("unit"):
+        return row["unit"]
     return LABELS.get(metric, (metric, ""))[1]
 
 
@@ -44,6 +50,8 @@ def _summary(scope: str, scope_id: str | None, days: int = 7) -> dict[str, Any]:
     if scope == "device" and scope_id:
         rows = [r for r in rows if r["device_id"] == scope_id]
 
+    # 指标的名字与单位以库里收到的为准，LABELS 只是兜底
+    catalog = {r["metric"]: r for r in store.metric_labels()}
     per_metric: dict[str, list[dict]] = {}
     for r in rows:
         per_metric.setdefault(r["metric"], []).append(r)
@@ -60,8 +68,8 @@ def _summary(scope: str, scope_id: str | None, days: int = 7) -> dict[str, Any]:
         last = sum(values[half:]) / max(1, len(values[half:]))
         metrics.append({
             "metric": metric,
-            "label": _label(metric),
-            "unit": _unit(metric),
+            "label": _label(metric, catalog),
+            "unit": _unit(metric, catalog),
             "mean": round(sum(values) / len(values), 3),
             "delta": round(last - first, 3),
             "pct": round((last - first) / first * 100, 1) if first else 0.0,
@@ -103,8 +111,8 @@ def _rules(summary: dict[str, Any]) -> dict[str, Any]:
             "findings": [], "actions": ["检查边的发件箱与云地址配置"], "confidence": "low",
         }
 
-    # 按相对变化排序：光照的 96 lx 和血压的 2.8 mmHg 不能直接比绝对值
-    moved = sorted(ms, key=lambda m: abs(m["pct"]), reverse=True)
+    # 先看统计显著性，再看相对变化：低基数指标的百分比不该霸榜
+    moved = sorted(ms, key=lambda m: (round(m["max_abs_z"], 1), abs(m["pct"])), reverse=True)
     top, second = moved[0], (moved[1] if len(moved) > 1 else None)
     hot = [m for m in ms if m["max_abs_z"] >= 2.5]
 
@@ -115,7 +123,8 @@ def _rules(summary: dict[str, Any]) -> dict[str, Any]:
         f"过去 {summary['from']} 至 {summary['to']}，共 {summary['devices']} 台设备上报了 "
         f"{sum(m['points'] for m in ms)} 个设备日聚合，覆盖 {len(ms)} 个指标。",
         f"{top['label']}的日均值从周期前段的基线变化 {top['delta']:+.1f} {top['unit']}"
-        f"（{top['pct']:+.1f}%），是这一周期里变化最大的指标。",
+        f"（{top['pct']:+.1f}%），峰值偏离 {top['max_abs_z']:.1f}σ，"
+        f"是这一周期最值得看的一项。",
     ]
     if second:
         parts.append(

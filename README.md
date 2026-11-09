@@ -52,6 +52,10 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 
 幂等键 `(edge_id, report_id)`；重复投递返回 `duplicate: true` 且不写库。
 
+**指标字典来自数据，不是常量。** 边在日聚合里带上 `module_id / label / unit / table`，
+云把它们一起入库；`/api/v1/meta` 由 `SELECT DISTINCT metric` 生成，
+所以换模块之后前端下拉框、AI 措辞、对比页都会自动多出新指标。
+
 ## 已实现的功能
 
 | 能力 | 说明 | 验证方式 |
@@ -62,6 +66,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 | AI 模式 A | 公有 API（`qwen3.5`），只发 k≥5 聚合，月度 token 预算熔断 | `tests/test_ai_public.py`，用本地假 API |
 | 报告缓存 | 同 scope + 周期 + 输入摘要 24 h 内复用 | `tests/test_ai.py` |
 | 词云 | jieba 分词 + 停用词 | `cloud/ai.py`、线上页面 |
+| 动态指标字典 | 标签/单位跟着上报走，不写死 | `/api/v1/meta` |
 | 保留期清理 | 日聚合 / 建议 / 词频 / 收件记录按天删 | `cloud/scheduler.py` |
 | 每日全网报告 | 24 h 没有新报告就补一份 | 同上 |
 | 隐私审计 | k 分布、抑制计数、拦截计数、字段白名单、导出留痕 | `tests/test_ingest.py` |

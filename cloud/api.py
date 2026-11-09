@@ -103,9 +103,11 @@ def ingest(body: dict[str, Any],
 
 @router.get("/meta", dependencies=admin)
 def meta() -> dict[str, Any]:
-    from .ai import LABELS
+    """指标字典来自已入库的数据：换了模块，下拉框自动多一项。"""
     return {
-        "metrics": [{"key": k, "label": v[0], "unit": v[1]} for k, v in LABELS.items()],
+        "metrics": [{"key": r["metric"], "label": r["label"], "unit": r["unit"],
+                     "module_id": r["module_id"], "devices": r["devices"]}
+                    for r in store.metric_labels()],
         "ai_mode": config.AI_MODE, "k_min": config.K_MIN,
         "cloud_name": config.CLOUD_NAME, "cloud_id": config.CLOUD_ID,
     }
