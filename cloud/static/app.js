@@ -220,13 +220,14 @@ async function viewEdges() {
   main.innerHTML = `<div class="title-row"><div><h1>边与设备</h1><p class="sub">读取中…</p></div></div>`;
   await ensureMeta().catch(() => {});
 
-  let edges;
+  let edges, devices;
   try {
-    edges = await api("/api/v1/edges");
+    [edges, devices] = await Promise.all([api("/api/v1/edges"), api("/api/v1/devices")]);
   } catch (e) {
     main.innerHTML = `<div class="title-row"><div><h1>边与设备</h1></div></div><div class="row">${errBox(`读不到边列表：${e.message}`)}</div>`;
     return;
   }
+  const edgeName = Object.fromEntries(edges.map((e) => [e.edge_id, e.name]));
 
   main.innerHTML = `
     <div class="title-row">
@@ -247,6 +248,23 @@ async function viewEdges() {
             <td class="num">${gate(e.k_min)}</td>
             <td class="num">${e.metrics.length}</td>
           </tr>`).join("")}</tbody>
+        </table>
+      </section>
+    </div>
+    <div class="row">
+      <section class="panel">
+        <div class="panel-head"><h2>设备</h2><span class="meta">${devices.length} 台 · 点一行看趋势</span></div>
+        <table class="table responsive">
+          <thead><tr><th>设备</th><th>所属边</th><th>场景</th><th>状态</th>
+            <th class="num">有数据天数</th><th class="num">最小 k</th></tr></thead>
+          <tbody>${devices.map((d) => `<tr data-href="#/devices/${esc(d.device_id)}">
+            <td class="mono">${esc(d.device_id)}</td>
+            <td>${esc(edgeName[d.edge_id] || d.edge_id)}</td>
+            <td>${esc(d.scene || "—")}</td>
+            <td>${d.online ? `<span class="pill pill-ok">在线</span>` : `<span class="pill pill-info">离线</span>`}</td>
+            <td class="num">${d.days}<span class="faint"> / 7</span></td>
+            <td class="num">${gate(d.k_min)}</td>
+          </tr>`).join("") || `<tr><td colspan="6" class="dash">还没有设备上报。</td></tr>`}</tbody>
         </table>
       </section>
     </div>`;
@@ -537,6 +555,17 @@ async function viewReports() {
   const taskLabel = { weekly_narrative: "趋势解读", fleet_compare: "跨边对比",
                       advice_digest: "本周三件事", wordcloud_label: "词云主题" };
 
+  const health = await api("/api/v1/health").catch(() => null);
+  const byTask = Object.keys(taskLabel).map((k) => ({
+    key: k, label: taskLabel[k],
+    n: list.filter((r) => (r.task || "weekly_narrative") === k).length,
+  }));
+  const hashes = list.map((r) => r.prompt_hash).filter(Boolean);
+  const cacheHits = hashes.length - new Set(hashes).size;
+  const used = health?.api_tokens_used ?? 0;
+  const budget = health?.api_budget ?? 0;
+  const pct = budget ? Math.min(100, Math.round((used / budget) * 100)) : 0;
+
   main.innerHTML = `
     <div class="title-row">
       <div><h1>AI 报告</h1>
@@ -597,6 +626,30 @@ async function viewReports() {
           </div>`
         : `<div class="empty">左侧选一份报告查看内容。</div>`}
       </section>
+    </div>
+
+    <div class="row split-even" style="align-items:start">
+      ${panel("任务分布", `${list.length} 份报告`, `<div class="list">
+        ${byTask.map((t) => `<div class="list-row">
+          <div class="grow"><div class="row-text">${t.label}</div>
+            <div class="row-sub">${esc(t.key)}</div></div>
+          <span class="mono">${t.n}</span>
+        </div>`).join("")}
+      </div>`)}
+      ${panel("成本与缓存", "公有 API 模式才计费", `<div class="list">
+        <div class="list-row"><div class="grow"><div class="row-text">本月 token</div>
+          <div class="row-sub">上限 ${fmtNum(budget)} · 已用 ${pct}%</div></div>
+          <span class="mono">${fmtNum(used)}</span></div>
+        <div class="list-row"><div class="grow"><div class="row-text">缓存命中</div>
+          <div class="row-sub">同输入 24 h 内复用</div></div>
+          <span class="mono">${cacheHits}</span></div>
+        <div class="list-row"><div class="grow"><div class="row-text">单次输入上限</div>
+          <div class="row-sub">超了先砍指标明细再砍建议</div></div>
+          <span class="mono">8k</span></div>
+        <div class="list-row"><div class="grow"><div class="row-text">单次输出上限</div>
+          <div class="row-sub">强约束 JSON，超长直接判失败</div></div>
+          <span class="mono">1k</span></div>
+      </div>`)}
     </div>`;
 
   main.querySelectorAll("[data-report]").forEach((tr) =>

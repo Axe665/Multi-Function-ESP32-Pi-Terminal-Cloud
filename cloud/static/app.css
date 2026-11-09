@@ -57,6 +57,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
 }
 
 ::selection { background: var(--accent); color: #fff; }
@@ -241,10 +242,10 @@ select.control {
   background: var(--sheet); color: var(--text);
   border: 1px solid var(--control); border-radius: var(--radius-sm);
   font: inherit; font-size: 13px; appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: calc(100% - 14px) 12px, calc(100% - 9px) 12px;
-  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  /* 下拉箭头用一张内联 SVG，不用两个渐变三角形 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M1 1l3.5 3.5L8 1' fill='none' stroke='%235a625f' stroke-width='1.2'/%3E%3C/svg%3E");
+  background-position: calc(100% - 11px) center;
+  background-repeat: no-repeat;
 }
 
 /* ---------------------------------------------------------------- AI 卡 */

@@ -70,17 +70,21 @@ EDGES = [
     ("edge-home-03", "家庭边节点"),
 ]
 
-BOARD_IDS = ["mt-3b-01", "mt-a64-02", "mt-rk64-03", "mt-pi4-04", "mt-g-01",
-             "mt-g-02", "mt-g-03", "mt-h-01", "mt-h-02", "mt-h-03"]
+# 每个边一段独立 ID：实验边的三个号与真实边节点一致，方便它上报时覆盖演示数据
+BOARD_IDS = {
+    "edge-lab-01": ["mt-3b-01", "mt-a64-02", "mt-rk64-03"],
+    "edge-green-02": ["mt-g-01", "mt-g-02", "mt-g-03"],
+    "edge-home-03": ["mt-h-01", "mt-h-02", "mt-h-03"],
+}
 
 
 def fleet(seed: int | None = None) -> dict[str, list[dict]]:
     """每个边抽 3 台设备，每台 1–2 个模块；模块组合每次不同。"""
     rnd = random.Random(seed)
-    pool = BOARD_IDS[:]
-    rnd.shuffle(pool)
     out: dict[str, list[dict]] = {}
     for edge_id, _name in EDGES:
+        pool = BOARD_IDS[edge_id][:]
+        rnd.shuffle(pool)
         devices = []
         for _ in range(3):
             dev = pool.pop()

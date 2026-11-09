@@ -220,20 +220,26 @@ def edges() -> list[dict[str, Any]]:
             d["devices"] = conn.execute(
                 "SELECT COUNT(*) FROM devices WHERE edge_id=?", (r["edge_id"],)).fetchone()[0]
             d["online_devices"] = conn.execute(
-                "SELECT COUNT(*) FROM devices WHERE edge_id=? AND online=1", (r["edge_id"],)).fetchone()[0]
+                "SELECT COUNT(*) FROM devices WHERE edge_id=? AND last_seen>=?",
+                (r["edge_id"], now_ms() - 2 * 3600_000)).fetchone()[0]
             out.append(d)
     return out
 
 
 def devices(edge_id: str | None = None) -> list[dict[str, Any]]:
+    """online 由 last_seen 现算，不用存的那一列 —— 存的值会一直停在最后一次上报。"""
     sql = "SELECT * FROM devices"
     args: tuple = ()
     if edge_id:
         sql += " WHERE edge_id=?"
         args = (edge_id,)
     sql += " ORDER BY edge_id, device_id"
+    cutoff = now_ms() - 2 * 3600_000
     with connect() as conn:
-        return [dict(r) for r in conn.execute(sql, args)]
+        rows = [dict(r) for r in conn.execute(sql, args)]
+    for r in rows:
+        r["online"] = bool(r["last_seen"]) and r["last_seen"] >= cutoff
+    return rows
 
 
 def series(edge_id: str | None, device_id: str | None, metric: str) -> list[dict[str, Any]]:
