@@ -121,8 +121,8 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**25 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
-公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period。
+**26 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
+公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔。
 
 ## 与架构文档 v2.2 的逐条对照
 
@@ -130,7 +130,7 @@ python3 -m unittest discover -s tests -t . -v
 |---|---|---|
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
-| §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`，不留空报告 |
+| §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板、建议文本按不可信数据处理 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`；建议文本去控制字符、截断并用「」分隔，prompt 明确它是数据不是指令 |
 | §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/日热力/词云/建议流）；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
