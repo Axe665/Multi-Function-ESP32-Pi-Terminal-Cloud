@@ -8,6 +8,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+      # 测试要拉起临时 Postgres，dev 依赖里带 pgserver，和 README 的本地步骤一致
+      - run: pip install -r requirements-dev.txt
       - run: python -m unittest discover -s tests -t . -v
       - run: python scripts/sync_contracts.py --check
