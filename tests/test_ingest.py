@@ -50,7 +50,7 @@ class IngestTest(unittest.TestCase):
         payload["telemetry_daily"][0]["subject"] = "abc123"
         r = self.client.post("/api/v1/ingest/edge-report", json=payload)
         self.assertEqual(r.status_code, 422)
-        self.assertEqual(r.json()["detail"]["code"], "raw_payload_rejected")
+        self.assertEqual(r.json()["detail"]["code"], "RAW_PAYLOAD_REJECTED")
         self.assertGreaterEqual(store.counters().get("raw_rejected", 0), 1)
 
     def test_low_k_rejected(self):

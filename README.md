@@ -108,6 +108,19 @@ python3 -m unittest discover -s tests -t . -v
 **22 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径。
 
+## 与架构文档 v2.2 的逐条对照
+
+| 文档条目 | 要求 | 现状 |
+|---|---|---|
+| §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama | **部分**：Caddy 配置在 `docker/Caddyfile`；存储用 SQLite、任务用 asyncio 调度，本机没有 PG/Redis 实例 |
+| §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
+| §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败落规则模板 | ✅ 四种任务（weekly_narrative / fleet_compare / advice_digest / wordcloud_label）都有规则实现，JSON 不过关就退回模板 |
+| §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计 |
+| §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现，另加 meta/compare/daily/auth |
+| §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
+| §6.7 备份 | 每日 pg_dump 保留 14 天 | **部分**：`scripts/backup.sh` 做 SQLite 在线备份并保留 14 天；换成 PG 后改一行 |
+| §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |
+
 ## 仍然没做的
 
 | 方案里的东西 | 现状 |

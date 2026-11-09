@@ -97,6 +97,7 @@ class Finding(Strict):
 
 class AiReportContent(Strict):
     schema_: Literal["ai.report.v1"] = Field(alias="schema", default="ai.report.v1")
+    task: str = "weekly_narrative"
     scope: Literal["fleet", "edge", "device"]
     scope_id: str | None = None
     period: dict[str, str]

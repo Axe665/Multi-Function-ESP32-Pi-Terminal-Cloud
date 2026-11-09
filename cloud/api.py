@@ -79,7 +79,7 @@ def ingest(body: dict[str, Any],
     if hits:
         store.bump("raw_rejected")
         store.audit("edge", "ingest.reject", body.get("edge_id", "?"), {"fields": hits[:5]})
-        raise HTTPException(422, {"code": "raw_payload_rejected",
+        raise HTTPException(422, {"code": "RAW_PAYLOAD_REJECTED",
                                   "message": "云端只接受 L2 聚合，不接受原始字段",
                                   "fields": hits[:5]})
     try:
@@ -87,7 +87,7 @@ def ingest(body: dict[str, Any],
     except ValidationError as e:
         store.audit("edge", "ingest.invalid", body.get("edge_id", "?"),
                     {"errors": e.errors(include_url=False, include_context=False)[:3]})
-        raise HTTPException(422, {"code": "schema_invalid",
+        raise HTTPException(422, {"code": "SCHEMA_INVALID",
                                   "errors": e.errors(include_url=False, include_context=False)[:5]})
 
     result = store.ingest_report(msg.model_dump(by_alias=True))
@@ -261,7 +261,10 @@ def ai_generate(body: dict[str, Any]) -> dict[str, Any]:
     if scope != "fleet" and not scope_id:
         raise HTTPException(400, "edge / device 必须给 scope_id")
     mode = body.get("mode", config.AI_MODE)
-    result = ai.generate(scope, scope_id, force_rules=(mode == "rules"))
+    task = body.get("task", "weekly_narrative")
+    if task not in ai.TASKS:
+        raise HTTPException(400, f"task 只能是 {'/'.join(ai.TASKS)}")
+    result = ai.generate(scope, scope_id, force_rules=(mode == "rules"), task=task)
     # 生成后写一条导出记录，供隐私审计页展示
     store.audit("admin", "export.report", f"report:{result['id']}",
                 {"model": result["model"], "scope": scope})

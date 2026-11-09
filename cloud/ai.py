@@ -42,6 +42,22 @@ def _window(days: int = 7) -> tuple[str, str]:
     return (today - dt.timedelta(days=days - 1)).isoformat(), today.isoformat()
 
 
+TASKS = ("weekly_narrative", "fleet_compare", "advice_digest", "wordcloud_label")
+
+
+def _clip(summary: dict[str, Any], max_tokens: int = 8000) -> dict[str, Any]:
+    """单次输入不超过 8k token：按字符粗估，超了就先把明细砍掉。"""
+    def size(obj) -> int:
+        return len(json.dumps(obj, ensure_ascii=False)) // 3
+
+    out = dict(summary)
+    while size(out) > max_tokens and out.get("metrics"):
+        out["metrics"] = out["metrics"][:-1]
+    while size(out) > max_tokens and out.get("advice_top"):
+        out["advice_top"] = out["advice_top"][:-1]
+    return out
+
+
 def _summary(scope: str, scope_id: str | None, days: int = 7) -> dict[str, Any]:
     """给模型（或规则）看的输入摘要：只有聚合，没有原始值。"""
     start, end = _window(days)
@@ -88,28 +104,133 @@ def _summary(scope: str, scope_id: str | None, days: int = 7) -> dict[str, Any]:
             {"text": a["text"], "risk": a["risk"], "device": a["device_id"]}
             for a in store.advice(scope_id if scope == "edge" else None, limit=8)
         ],
+        # 摘要类任务要用到聚合结果
+        "advice_counts": _advice_counts(scope_id),
+        "words": [w["word"] for w in store.wordcloud(scope_id, days, dt.date.today().isoformat())[:8]],
         "privacy": store.counters(),
     }
 
 
-def prompt_hash(summary: dict[str, Any]) -> str:
-    """只对输入摘要取哈希：同一份输入 24 h 内复用报告，不重复消耗算力。"""
-    raw = json.dumps(summary, sort_keys=True, ensure_ascii=False)
+def _advice_counts(scope_id: str | None) -> list[dict[str, Any]]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            """SELECT text, risk, COUNT(*) AS n FROM advice
+               WHERE (? IS NULL OR edge_id = ?) GROUP BY text ORDER BY n DESC LIMIT 6""",
+            (scope_id, scope_id)).fetchall()
+    return [{"text": r["text"], "risk": r["risk"], "count": r["n"]} for r in rows]
+
+
+def _by_edge() -> list[dict[str, Any]]:
+    """按边聚合出各指标的均值，供 fleet_compare 用。"""
+    with store.connect() as conn:
+        rows = conn.execute(
+            """SELECT edge_id, metric, AVG(mean) AS mean, MAX(ABS(z)) AS z
+               FROM telemetry_daily GROUP BY edge_id, metric""").fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out.setdefault(r["edge_id"], {"edge_id": r["edge_id"], "metrics": []})
+        out[r["edge_id"]]["metrics"].append(
+            {"metric": r["metric"], "mean": round(r["mean"], 2), "z": round(r["z"], 2)})
+    return list(out.values())
+
+
+def prompt_hash(summary: dict[str, Any], task: str = "weekly_narrative") -> str:
+    """对「输入摘要 + 任务类型」取哈希：同一份输入 24 h 内复用报告。"""
+    raw = json.dumps(summary, sort_keys=True, ensure_ascii=False) + "|" + task
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _rules(summary: dict[str, Any]) -> dict[str, Any]:
+def _rules(summary: dict[str, Any], task: str = "weekly_narrative") -> dict[str, Any]:
+    if task == "advice_digest":
+        return _rules_digest(summary)
+    if task == "fleet_compare":
+        return _rules_compare(summary)
+    if task == "wordcloud_label":
+        return _rules_words(summary)
+    return _rules_narrative(summary)
+
+
+def _base(summary: dict[str, Any], headline: str, narrative: str,
+          confidence: str = "low") -> dict[str, Any]:
+    return {"schema": "ai.report.v1", "scope": summary["scope"],
+            "scope_id": summary["scope_id"], "task": summary.get("task"),
+            "period": {"from": summary["from"], "to": summary["to"]},
+            "headline": headline, "narrative": narrative,
+            "findings": [], "actions": [], "confidence": confidence}
+
+
+def _rules_digest(summary: dict[str, Any]) -> dict[str, Any]:
+    pools = summary.get("advice_counts") or []
+    if not pools:
+        return _base(summary, "本周没有需要单独处理的建议",
+                     "这一周期里设备没有产出告警或关注级建议，可以按常规节奏巡检。")
+    top = pools[:3]
+    head = f"本周值得关注的三件事：{top[0]['text'][:18]}"
+    parts = [f"这一周期共记录 {sum(p['count'] for p in pools)} 条建议，按出现次数排序："]
+    for i, p in enumerate(top, 1):
+        parts.append(f"{i}. {p['text']}（{p['count']} 次，{p['risk']}）")
+    parts.append("同一条建议在多台设备重复出现时，通常对应一个共同的环境因素，"
+                 "优先排查共性而不是逐台处理。")
+    body = _base(summary, head, "".join(parts))
+    body["findings"] = [{"label": p["text"][:16], "detail": f"出现 {p['count']} 次",
+                         "risk": p["risk"]} for p in top]
+    body["actions"] = [f"从「{top[0]['text'][:20]}」开始排查", "核对重复出现建议的设备是否在同一时段"]
+    return body
+
+
+def _rules_compare(summary: dict[str, Any]) -> dict[str, Any]:
+    edges = summary.get("edges") or []
+    if len(edges) < 2:
+        return _rules_narrative(summary)
+    groups = _by_edge()
+    metrics = sorted({m["metric"] for g in groups for m in g["metrics"]})
+    worst, worst_gap, worst_metric = None, 0.0, None
+    for metric in metrics:
+        vals = {m["metric"]: m["mean"] for g in groups for m in g["metrics"]}
+        present = [g for g in groups if any(m["metric"] == metric for m in g["metrics"])]
+        if len(present) < 2:
+            continue
+        means = [next(m["mean"] for m in g["metrics"] if m["metric"] == metric) for g in present]
+        lo, hi = min(means), max(means)
+        gap = (hi - lo) / abs(lo) if lo else 0
+        if gap > worst_gap:
+            worst, worst_gap, worst_metric = hi, gap, metric
+    if not worst_metric:
+        return _rules_narrative(summary)
+    label = _label(worst_metric)
+    head = f"{label}在边之间的差异最大，相差 {worst_gap * 100:.0f}%"
+    body = _base(summary, head,
+                 f"对比 {len(groups)} 个边的日均值，{label}的极差最为明显（最高 {worst:.1f}）。"
+                 f"差异通常来自场景不同（诊室、温室、配电），先确认是否属于预期，"
+                 f"再看同一场景的边之间是否也在分化。")
+    body["findings"] = [{"label": label, "detail": f"极差 {worst_gap * 100:.0f}%，最高 {worst:.1f}",
+                         "risk": "watch"}]
+    body["actions"] = [f"展开{label}的跨边对比，确认差异来自场景还是异常"]
+    return body
+
+
+def _rules_words(summary: dict[str, Any]) -> dict[str, Any]:
+    words = summary.get("words") or []
+    if not words:
+        return _base(summary, "词云还没有主题词", "这一周期没有生成足够的建议文本，"
+                                                  "等第一份报表到达后再挑词。")
+    head = "词云主题：" + "、".join(words[:4])
+    body = _base(summary, head,
+                 f"建议文本里出现最多的词依次是 {'、'.join(words[:6])}。"
+                 "词云只反映设备侧建议的用词频次，不代表严重程度；"
+                 "严重程度看同一份报告里的 findings。")
+    body["findings"] = [{"label": w, "detail": "词频靠前", "risk": "info"} for w in words[:3]]
+    return body
+
+
+def _rules_narrative(summary: dict[str, Any]) -> dict[str, Any]:
     """规则模板：不调模型也能给出可读报告，confidence=low。"""
     ms = summary["metrics"]
     if not ms:
-        return {
-            "schema": "ai.report.v1", "scope": summary["scope"],
-            "scope_id": summary["scope_id"],
-            "period": {"from": summary["from"], "to": summary["to"]},
-            "headline": "本周期没有可分析的聚合数据",
-            "narrative": "边缘节点还没有上报 k≥5 的日聚合，等第一份报表到达后再生成解读。",
-            "findings": [], "actions": ["检查边的发件箱与云地址配置"], "confidence": "low",
-        }
+        body = _base(summary, "本周期没有可分析的聚合数据",
+                     "边缘节点还没有上报 k≥5 的日聚合，等第一份报表到达后再生成解读。")
+        body["actions"] = ["检查边的发件箱与云地址配置"]
+        return body
 
     # 先看统计显著性，再看相对变化：低基数指标的百分比不该霸榜
     moved = sorted(ms, key=lambda m: (round(m["max_abs_z"], 1), abs(m["pct"])), reverse=True)
@@ -150,13 +271,10 @@ def _rules(summary: dict[str, Any]) -> dict[str, Any]:
         actions.append(f"让边节点重新生成{hot[0]['label']}的趋势与建议，确认是否持续性偏移")
     actions.append("在设备页展开最近 7 天趋势，确认工作日与周末是否分开")
 
-    return {
-        "schema": "ai.report.v1", "scope": summary["scope"], "scope_id": summary["scope_id"],
-        "period": {"from": summary["from"], "to": summary["to"]},
-        "headline": headline,
-        "narrative": "".join(parts),
-        "findings": findings, "actions": actions[:3], "confidence": "low",
-    }
+    body = _base(summary, headline, "".join(parts))
+    body["findings"] = findings
+    body["actions"] = actions[:3]
+    return body
 
 
 PROMPT = """你是端-边-云系统的数据分析助手。只根据给出的 JSON 摘要写报告，
@@ -235,15 +353,21 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
             data.setdefault("scope_id", summary["scope_id"])
             data.setdefault("period", {"from": summary["from"], "to": summary["to"]})
             data.setdefault("confidence", "high")
+            data.setdefault("task", task)
             return data
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             if attempt == 1:
                 return None
 
 
-def generate(scope: str, scope_id: str | None = None, force_rules: bool = False) -> dict[str, Any]:
+def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
+             task: str = "weekly_narrative") -> dict[str, Any]:
+    if task not in TASKS:
+        task = "weekly_narrative"
     summary = _summary(scope, scope_id)
-    ph = prompt_hash(summary)
+    summary["task"] = task
+    summary = _clip(summary)
+    ph = prompt_hash(summary, task)
     if not force_rules:
         hit = store.find_report(scope, scope_id, summary["to"], ph,
                                 store.now_ms() - 24 * 3600_000)
@@ -264,7 +388,7 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False)
                 model = config.OLLAMA_MODEL
     # 模型不可用、输出不合契约、或显式要求 → 规则模板，不允许空报告
     if not content:
-        content = _rules(summary)
+        content = _rules(summary, task)
         model = "rules-v1"
 
     from . import models
@@ -277,5 +401,5 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False)
         ph, validated.model_dump(by_alias=True),
         tokens_in, tokens_out)
     store.audit("admin", "ai.report.generate", f"report:{rid}",
-                {"scope": scope, "scope_id": scope_id, "model": model})
+                {"scope": scope, "scope_id": scope_id, "model": model, "task": task})
     return {"id": rid, "model": model, "content": validated.model_dump(by_alias=True)}

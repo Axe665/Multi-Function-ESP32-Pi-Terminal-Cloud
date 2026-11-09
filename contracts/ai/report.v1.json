@@ -6,8 +6,10 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "scope", "period", "headline", "narrative", "confidence"],
+  "task": { "enum": ["weekly_narrative", "fleet_compare", "advice_digest", "wordcloud_label"] },
   "properties": {
     "schema": { "const": "ai.report.v1" },
+    "task": { "enum": ["weekly_narrative", "fleet_compare", "advice_digest", "wordcloud_label"] },
     "scope": { "enum": ["fleet", "edge", "device"] },
     "scope_id": { "type": ["string", "null"] },
     "period": {
