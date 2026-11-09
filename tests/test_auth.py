@@ -10,11 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 _TMP = tempfile.mkdtemp(prefix="cloud-auth-")
-os.environ.setdefault("CLOUD_DB", os.path.join(_TMP, "cloud.db"))
 os.environ.setdefault("CLOUD_DATA_DIR", _TMP)
 os.environ.setdefault("CLOUD_AI_MODE", "rules")
 
 from fastapi.testclient import TestClient  # noqa: E402
+
+from tests.support import ensure_pg  # noqa: E402
+
+ensure_pg()
 
 from cloud import auth, config, store  # noqa: E402
 from cloud.main import app  # noqa: E402

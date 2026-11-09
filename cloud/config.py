@@ -13,7 +13,14 @@ def _env(key: str, default: str = "") -> str:
 
 
 DATA_DIR = Path(_env("CLOUD_DATA_DIR", str(ROOT / "data")))
-DB_PATH = Path(_env("CLOUD_DB", str(DATA_DIR / "cloud.db")))
+BACKUP_DIR = Path(_env("CLOUD_BACKUP_DIR", str(ROOT / "backups")))
+
+# 主库：Postgres 16（文档 §6.2 的 DDL 直接可用）
+PG_DSN = _env("CLOUD_PG_DSN", "postgresql://cloud:cloud@127.0.0.1:5432/cloud")
+# 任务队列 + 缓存
+REDIS_URL = _env("CLOUD_REDIS_URL", "redis://127.0.0.1:6379/0")
+# 测试与无 Redis 的演示：任务同步执行，不进队列
+QUEUE_SYNC = _env("CLOUD_QUEUE_SYNC", "0") == "1"
 
 CLOUD_ID = _env("CLOUD_ID", "cloud-home-01")
 CLOUD_NAME = _env("CLOUD_NAME", "私有云 · 家庭实验室")
@@ -43,4 +50,4 @@ SESSION_KEY = _env("CLOUD_SESSION_KEY")
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)

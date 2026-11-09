@@ -19,15 +19,21 @@
 
 ```bash
 python3 -m pip install -r requirements.txt
+# 先起 Postgres 16 与 Redis 7（可以用 compose 只起这两个）
+docker compose -f docker/compose.yml up -d postgres redis
 ./run.sh                       # 首次自动写入 3 个边 × 3 台设备 × 14 天演示数据
 # http://127.0.0.1:8002
 ```
 
-Docker（含可选 Ollama）：
+整套（caddy + web + api + worker + postgres + redis + ollama）：
 
 ```bash
 cd docker && docker compose up -d --build
+docker compose ps              # api / worker / postgres / redis 全部 healthy
 ```
+
+单测用 `pip install -r requirements-dev.txt` 后直接 `python3 -m unittest discover -s tests -t .`：
+`pgserver` 会拉起一个临时 Postgres，不需要 sudo 或 docker；`CLOUD_QUEUE_SYNC=1` 让任务就地执行。
 
 需要登录时（多机部署务必开）：
 
@@ -112,22 +118,22 @@ python3 -m unittest discover -s tests -t . -v
 
 | 文档条目 | 要求 | 现状 |
 |---|---|---|
-| §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama | **部分**：Caddy 配置在 `docker/Caddyfile`；存储用 SQLite、任务用 asyncio 调度，本机没有 PG/Redis 实例 |
+| §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama | ✅ `docker/compose.yml` 七个服务；主库 Postgres 16，队列 Redis 7 + RQ，worker 跑 AI 报告/词频/跨边聚合 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败落规则模板 | ✅ 四种任务（weekly_narrative / fleet_compare / advice_digest / wordcloud_label）都有规则实现，JSON 不过关就退回模板 |
 | §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计 |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现，另加 meta/compare/daily/auth |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
-| §6.7 备份 | 每日 pg_dump 保留 14 天 | **部分**：`scripts/backup.sh` 做 SQLite 在线备份并保留 14 天；换成 PG 后改一行 |
+| §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），`CLOUD_BACKUP_DIR` 指到外接盘，保留 14 天 |
 | §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |
 
 ## 仍然没做的
 
 | 方案里的东西 | 现状 |
 |---|---|
-| PostgreSQL + Redis + RQ | 用 SQLite + 进程内 asyncio 调度替代。表结构与 DDL 一一对应，换 Postgres 只需改 `store.py` 的占位符与连接；本机没有 PG 实例，未验证 |
+
 | 边证书 mTLS 终止 | Caddy 的 TLS 已配好，应用侧用 Bearer token；接 client cert 只差 `tls { client_auth }` |
-| 每日 pg_dump + 加密离线副本 | 只有 `scripts/backup.sh`（SQLite 在线备份，保留 14 天，可选 gpg 加密） |
+| 每周加密离线副本 | 还没做：备份文件本身没加密，也没排每周异地拷贝（`scripts/backup.sh` 只做每日 pg_dump + 14 天保留） |
 | 多租户 | 明确不做（方案里也不在范围） |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。

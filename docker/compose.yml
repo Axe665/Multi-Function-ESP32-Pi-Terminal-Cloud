@@ -1,38 +1,138 @@
+# 云节点：caddy + web + api + worker + postgres + redis + ollama（文档 §6.1）
+# 数据卷：pgdata、caddy_data、backups、ollama_models
+x-cloud: &cloud
+  build: ..
+  image: modular-terminal-cloud:2.0.0
+  restart: unless-stopped
+  environment: &cloud-env
+    CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
+    CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}
+    CLOUD_PG_DSN: postgresql://cloud:${CLOUD_DB_PASSWORD:-cloud}@postgres:5432/cloud
+    CLOUD_REDIS_URL: redis://redis:6379/0
+    CLOUD_BACKUP_DIR: /backups
+    CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
+    CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
+    CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
+    CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
+    CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+    TZ: Asia/Shanghai
+
 services:
-  cloud:
-    build: ..
-    image: modular-terminal-cloud:1.0.0
-    container_name: mt-cloud
+  # 内网 TLS 入口（cloud-ca 签发）。公网只放行两条 API，见 Caddyfile
+  caddy:
+    image: caddy:2-alpine
+    container_name: mt-cloud-caddy
     restart: unless-stopped
     ports:
-      # 公网入口只在 /api/v1/ingest/edge-report 与 /api/v1/health，见 deploy/Caddyfile
-      - "127.0.0.1:8002:8002"
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+  # 静态前端（构建产物由镜像里的 web 服务提供）
+  web:
+    image: caddy:2-alpine
+    container_name: mt-cloud-web
+    restart: unless-stopped
+    volumes:
+      - ../cloud/static:/srv/web:ro
+      - ./Caddyfile.web:/etc/caddy/Caddyfile:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+  # 只接请求：查询、管理、摄取
+  api:
+    <<: *cloud
+    container_name: mt-cloud-api
+    command: ["python", "-m", "uvicorn", "cloud.main:app", "--host", "0.0.0.0", "--port", "8002"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # 队列消费者 + 定时任务（AI 报告、词频、跨边聚合、清理、备份）
+  worker:
+    <<: *cloud
+    container_name: mt-cloud-worker
+    command: ["python", "-m", "cloud.worker"]
+    environment:
+      <<: *cloud-env
+      CLOUD_QUEUE_SYNC: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # 镜像里的 HEALTHCHECK 是给 api 的，worker 不监听端口
+    healthcheck:
+      disable: true
     volumes:
       - ../data:/app/data
+      - ${CLOUD_BACKUP_HOST_DIR:-../backups}:/backups
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  postgres:
+    image: postgres:16
+    container_name: mt-cloud-db
+    restart: unless-stopped
     environment:
-      CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
-      CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}
-      CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
-      CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
-      CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
-      CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
-      CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
-      TZ: Asia/Shanghai
-    depends_on:
-      - ollama
+      POSTGRES_DB: cloud
+      POSTGRES_USER: cloud
+      POSTGRES_PASSWORD: ${CLOUD_DB_PASSWORD:-cloud}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     deploy:
       resources:
         limits:
           memory: 2g
 
-  # 本地模型（可选）。没有 GPU 时会很慢，把 CLOUD_AI_MODE 设成 rules 可以直接跳过。
+  redis:
+    image: redis:7-alpine
+    container_name: mt-cloud-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # 本地模型（模式 B）。没 GPU 会很慢，CLOUD_AI_MODE=rules 可跳过
   ollama:
     image: ollama/ollama:latest
     container_name: mt-ollama
     restart: unless-stopped
     volumes:
-      - ../data/ollama:/root/.ollama
+      - ollama_models:/root/.ollama
     deploy:
       resources:
         limits:
           memory: 8g
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:
+  ollama_models:

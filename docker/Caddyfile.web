@@ -1,0 +1,7 @@
+# 只做静态文件，给 caddy 反代用
+:8080 {
+	root * /srv/web
+	encode gzip
+	try_files {path} /index.html
+	file_server
+}

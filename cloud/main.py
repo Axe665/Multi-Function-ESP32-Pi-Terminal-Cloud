@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import api, auth, config, scheduler, store
+from . import api, auth, config, store
 
 DESCRIPTION = """\
 私有云：接收边节点上报的日聚合与建议文本，做跨边对比、AI 解读与隐私审计。
@@ -19,11 +19,10 @@ DESCRIPTION = """\
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler.scheduler.start()
+    # 定时任务在 worker 进程里（cloud.worker），api 只接请求
     if auth.required() and not config.ADMIN_TOTP:
         print(f"auth: 已启用口令登录但没有 TOTP；生成密钥：{auth.secret_hint()}", flush=True)
     yield
-    await scheduler.scheduler.stop()
 
 
 def create_app() -> FastAPI:

@@ -1,0 +1,4 @@
+# 测试用：不用 sudo 也能跑真实 Postgres / Redis
+-r requirements.txt
+pgserver>=0.1
+redislite>=6.0

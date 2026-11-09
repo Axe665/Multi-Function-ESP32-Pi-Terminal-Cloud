@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
-from . import ai, auth, config, models, scheduler, store
+from . import ai, auth, config, models, queue, store
 
 router = APIRouter(prefix="/api/v1")
 
@@ -221,6 +221,7 @@ def daily(edge: str | None = None, limit: int = Query(default=40, ge=1, le=500))
 def compare(metric: str) -> dict[str, Any]:
     """多边同指标对比：原始值 + 以首日为 100 的归一化指数。"""
     es = store.edges()
+    rollup = queue.cache_get("rollup:edges") or {}
     out = []
     for e in es:
         pts = store.series(e["edge_id"], None, metric)
@@ -234,7 +235,8 @@ def compare(metric: str) -> dict[str, Any]:
             "k_min": min(p["k"] for p in pts),
         })
     days = sorted({p["day"] for s in out for p in s["points"]})
-    return {"metric": metric, "edges": out, "days": days}
+    return {"metric": metric, "edges": out, "days": days,
+            "rollup": (rollup.get("edges") or {}) if isinstance(rollup, dict) else {}}
 
 
 # ---------------------------------------------------------------- AI 报告
@@ -264,11 +266,13 @@ def ai_generate(body: dict[str, Any]) -> dict[str, Any]:
     task = body.get("task", "weekly_narrative")
     if task not in ai.TASKS:
         raise HTTPException(400, f"task 只能是 {'/'.join(ai.TASKS)}")
-    result = ai.generate(scope, scope_id, force_rules=(mode == "rules"), task=task)
-    # 生成后写一条导出记录，供隐私审计页展示
-    store.audit("admin", "export.report", f"report:{result['id']}",
-                {"model": result["model"], "scope": scope})
-    return result
+    # 文档 §6.1：AI 报告在 worker 里生成。等不及就返回 job_id，前端再查。
+    out = queue.submit("generate_report", scope, scope_id, task, mode, wait=120)
+    if out["status"] == "done":
+        return out["result"]
+    if out["status"] == "failed":
+        raise HTTPException(500, f"报告生成失败：{out.get('error', '')}")
+    return {"queued": True, "job_id": out["job_id"], "scope": scope, "task": task}
 
 
 # ---------------------------------------------------------------- 隐私审计
@@ -319,5 +323,5 @@ def health() -> dict[str, Any]:
         "auth_required": auth.required(),
         "api_tokens_used": store.counters().get("api_tokens", 0),
         "api_budget": config.API_BUDGET_TOKENS,
-        "scheduler": {"ticks": scheduler.scheduler.ticks, "last": scheduler.scheduler.last},
+        "queue": queue.stats(),
     }

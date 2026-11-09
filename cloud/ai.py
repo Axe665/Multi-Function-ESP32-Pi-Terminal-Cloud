@@ -115,7 +115,8 @@ def _advice_counts(scope_id: str | None) -> list[dict[str, Any]]:
     with store.connect() as conn:
         rows = conn.execute(
             """SELECT text, risk, COUNT(*) AS n FROM advice
-               WHERE (? IS NULL OR edge_id = ?) GROUP BY text ORDER BY n DESC LIMIT 6""",
+               WHERE (%s::text IS NULL OR edge_id = %s)
+               GROUP BY text, risk ORDER BY n DESC LIMIT 6""",
             (scope_id, scope_id)).fetchall()
     return [{"text": r["text"], "risk": r["risk"], "count": r["n"]} for r in rows]
 

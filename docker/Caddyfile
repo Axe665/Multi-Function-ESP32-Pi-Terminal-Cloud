@@ -1,22 +1,26 @@
-# 公网只放行两条 API；管理台与 Ollama 仅内网。
-# 证书用 cloud-ca 签发（内网自签根），边缘节点预置 cloud-ca.crt。
-
+# 公网只放行两条 API；管理台与 Ollama 只在内网。
+# 证书用 cloud-ca 签发（内网自签根），边的 mTLS 预置同一份根。
 {
-	# 边 → 云：只这一条写接口
+	# 边 → 云：唯一写入口
 	@ingest path /api/v1/ingest/edge-report
 	handle @ingest {
-		reverse_proxy cloud:8002
+		reverse_proxy api:8002
 	}
 
-	# 健康检查给运维用
+	# 运维健康检查
 	@health path /api/v1/health
 	handle @health {
-		reverse_proxy cloud:8002
+		reverse_proxy api:8002
 	}
 
-	# 其余一律拒绝：管理台不做公网域名
+	# 管理 API（内网）
+	handle /api/* {
+		reverse_proxy api:8002
+	}
+
+	# 管理台前端（内网）
 	handle {
-		respond "not exposed" 404
+		reverse_proxy web:8080
 	}
 
 	tls {

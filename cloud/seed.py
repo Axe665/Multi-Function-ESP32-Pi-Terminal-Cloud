@@ -63,13 +63,14 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
     for edge_id, edge_name in demo_fleet.EDGES:
         with store.connect() as conn:
             conn.execute(
-                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version) VALUES(?,?,?,?,?)",
+                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version)"
+                " VALUES(%s,%s,%s,%s,%s)",
                 (edge_id, edge_name, hashlib.sha256(edge_id.encode()).hexdigest()[:16],
                  store.now_ms(), "1.0.0"))
             for dev in fleet[edge_id]:
                 conn.execute(
-                    """INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen, online)
-                       VALUES(?,?,?,?,?,1)""",
+                    """INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen)
+                       VALUES(%s,%s,%s,%s,%s)""",
                     (dev["device_id"], edge_id, dev["scene"],
                      json.dumps(dev["modules"]), store.now_ms()))
 
@@ -94,10 +95,14 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
                     k = 6 + r.randint(0, 4)
                     with store.connect() as conn:
                         conn.execute(
-                            """INSERT OR REPLACE INTO telemetry_daily
+                            """INSERT INTO telemetry_daily
                                (edge_id, device_id, day, metric, n_subjects, n_samples,
                                 mean, slope, z, k, module_id, label, unit, table_name)
-                               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                               ON CONFLICT(edge_id, device_id, day, metric) DO UPDATE SET
+                                 mean=EXCLUDED.mean, slope=EXCLUDED.slope, z=EXCLUDED.z,
+                                 k=EXCLUDED.k, n_subjects=EXCLUDED.n_subjects,
+                                 n_samples=EXCLUDED.n_samples""",
                             (edge_id, dev["device_id"], day, metric, k, k * 260,
                              round(value, 3), round(r.gauss(0, 0.08), 3),
                              round(z, 2), k, row["module_id"], row["label"],
@@ -112,10 +117,11 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
                     ts = int(dt.datetime.fromisoformat(day + "T12:00:00").timestamp() * 1000)
                     with store.connect() as conn:
                         conn.execute(
-                            """INSERT OR IGNORE INTO advice
+                            """INSERT INTO advice
                                (edge_id, device_id, text, risk, confidence, source, created_at)
-                               VALUES(?,?,?,?,?,?,?)""",
-                            (edge_id, dev["device_id"], text, risk, conf, "local", ts))
+                               VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                            (edge_id, dev["device_id"], text, risk, conf, "local",
+                             store._ms(ts)))
                     adv_rows += 1
                     low = text.lower()
                     for w in LEXICON:
@@ -123,10 +129,12 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
                             words[(day, edge_id, w)] = words.get((day, edge_id, w), 0) + 1
 
     with store.connect() as conn:
-        conn.executemany("INSERT INTO word_freq(day, scope, word, count) VALUES(?,?,?,?)",
-                         [(day, scope, w, c) for (day, scope, w), c in words.items()])
-        conn.execute("INSERT INTO counters(key, value) VALUES('rows_ingested', ?)", (rows,))
-        conn.execute("INSERT INTO counters(key, value) VALUES('suppressed_buckets', ?)",
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO word_freq(day, scope, word, count) VALUES(%s,%s,%s,%s)",
+                [(day, scope, w, c) for (day, scope, w), c in words.items()])
+        conn.execute("INSERT INTO counters(key, value) VALUES('rows_ingested', %s)", (rows,))
+        conn.execute("INSERT INTO counters(key, value) VALUES('suppressed_buckets', %s)",
                      (suppressed * 12,))
 
     from . import ai
