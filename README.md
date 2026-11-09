@@ -132,7 +132,7 @@ python3 -m unittest discover -s tests -t . -v
 | §6.4 网站 | 五页 | ✅ 总览 / 边与设备 / 对比 / AI 报告 / 隐私审计；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现，另加 meta/compare/daily/auth |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
-| §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），`CLOUD_BACKUP_DIR` 指到外接盘，保留 14 天 |
+| §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
 | §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |
 
 ## 仍然没做的
@@ -140,8 +140,8 @@ python3 -m unittest discover -s tests -t . -v
 | 方案里的东西 | 现状 |
 |---|---|
 
-| 边证书 mTLS 终止 | Caddy 的 TLS 已配好，应用侧用 Bearer token；接 client cert 只差 `tls { client_auth }` |
-| 每周加密离线副本 | 还没做：备份文件本身没加密，也没排每周异地拷贝（`scripts/backup.sh` 只做每日 pg_dump + 14 天保留） |
+| 备份落外接 USB 盘 | 路径可配（`CLOUD_BACKUP_HOST_DIR`），默认落在仓库的 `backups/`；换盘只改环境变量 |
+| 每周副本的异地存放 | 加密副本已做（gpg AES256），但"拷到另一块盘"属于运维动作，代码只负责生成 |
 | 多租户 | 明确不做（方案里也不在范围） |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。
