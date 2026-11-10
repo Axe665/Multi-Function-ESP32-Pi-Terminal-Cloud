@@ -133,7 +133,8 @@ const coverOption = computed(() => {
   const t = tk.value
   const rows = (devices.value || []).slice(0, 12)
   return {
-    grid: { left: 4, right: 8, top: 16, bottom: 6, containLabel: true },
+    // 40° 斜标签 containLabel 算不全，底部留两行
+    grid: { left: 4, right: 8, top: 16, bottom: 30, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (p) => {
