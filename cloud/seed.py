@@ -55,6 +55,13 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
     adv_rows = 0
     words: dict[tuple[str, str, str], int] = {}
 
+    # 演示要留一条能确认/静音的告警：固定一台设备的最后两天连续越界。
+    # 不掉线、不造假心跳，用的是和真上报一样的日聚合 z。
+    home = fleet["edge-home-03"]
+    alert_dev = next((d for d in home if any(m["metric"] == "temperature_c" for m in d["metrics"])), home[0])
+    alert_metric = ("temperature_c" if any(m["metric"] == "temperature_c" for m in alert_dev["metrics"])
+                    else alert_dev["metrics"][0]["metric"])
+
     with store.connect() as conn:
         for table in ("telemetry_daily", "advice", "word_freq", "devices",
                       "edges", "counters", "ai_reports", "audit", "reports"):
@@ -89,9 +96,13 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
                     weekly = 1.0 + (0.04 if weekday >= 5 else 0)
                     value = demo_fleet.BASE.get(metric, 10) + drift + r.gauss(0, max(0.4, demo_fleet.BASE.get(metric, 10) * 0.012))
                     value = max(0.2, value * weekly if metric in ("counter_delta", "counter_rate", "intrusion_count") else value)
-                    z = r.gauss(0, 0.6)
-                    if r.random() < 0.03:
-                        z = r.choice([-1, 1]) * r.uniform(2.6, 3.6)
+                    if dev["device_id"] == alert_dev["device_id"] and metric == alert_metric \
+                            and day_index >= days - 2:
+                        z = 2.9 + (day_index - (days - 2)) * 0.3
+                    else:
+                        z = r.gauss(0, 0.6)
+                        if r.random() < 0.03:
+                            z = r.choice([-1, 1]) * r.uniform(2.6, 3.6)
                     k = 6 + r.randint(0, 4)
                     with store.connect() as conn:
                         conn.execute(

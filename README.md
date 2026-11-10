@@ -36,7 +36,7 @@
 
 | 页面 | 它回答的问题 | 关键内容 |
 |---|---|---|
-| 总览 | 现在有没有事，先处理哪一条？ | 状态行（严重度 + 计数）、待处理异常 Top 4（确认/静音）、全网拓扑缩略图、边与设备行、近 7 天完整率、本周报告摘要 |
+| 总览 | 现在有没有事，先处理哪一条？ | 首屏 6 块图：全网拓扑（带边名、设备悬停、可缩放）、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5；右栏待处理（确认/静音）与本周报告摘要 |
 | 边与设备 | 问题出在哪个边、哪台设备？ | 两级下钻：点边筛设备，点设备进详情（趋势/日热力/词云/建议流） |
 | 对比 | 谁跑得不一样？ | 同指标跨边指数（首日 = 100）、末日指数与变化 |
 | AI 报告 | 机器怎么看这一周？ | 报告列表、findings、动作、模型与 token；可按原区间重新生成 |
@@ -102,7 +102,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 |---|---|---|
 | 摄取与幂等 | 原始字段 422、k<5 整份拒收、重复投递不写库 | `tests/test_ingest.py` |
 | 管理员登录 | 口令 + TOTP（RFC 6238）+ HMAC 会话 cookie | `tests/test_auth.py`，含 RFC 测试向量 |
-| AI 模式 B（默认） | 本地 Ollama，模型 `qwen3.5`；不可用退回规则模板 | `tests/test_ai.py` |
+| AI 模式 B（默认） | 本地 Ollama，模型 `qwen3.5:9b`；不可用退回规则模板 | `tests/test_ai.py` |
 | AI 模式 A | 公有 API（`qwen3.5`），只发 k≥5 聚合，月度 token 预算熔断 | `tests/test_ai_public.py`，用本地假 API |
 | 报告缓存 | 同 scope + 周期 + 输入摘要 24 h 内复用 | `tests/test_ai.py` |
 | 词云 | jieba 分词 + 停用词 | `cloud/ai.py`、线上页面 |
@@ -114,6 +114,14 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 | 公网最小暴露 | 只有 `/ingest/edge-report` 与 `/health` 不要求登录；`/ollama/*` 只在内网站点 | `docker/Caddyfile` |
 | mDNS 广播 | 云广播 `_orpi-cloud._tcp`（v/id/port/ca_fp），边据此发现云 | `cloud/mdns.py`，容器内实测 `on: true` |
 | 演示模式 | `demo` 与构建号随 `/health` 暴露，侧栏底部标注「演示数据」；seed 写审计 | `cloud/seed.py`、`cloud/api.py` |
+
+### 最近补的
+
+- **公网两条路由限速**：`ingest` 60 次/分、`health` 120 次/分，按客户端 IP，超了 429。
+- **管理员登录锁定**：10 分钟内错 5 次锁 10 分钟，锁定期间也回 429，写入 `auth.login` 审计。
+- **总览重做**：首屏 6 块图（带边名的全网拓扑、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5）+ 右栏待处理与摘要；拓扑可缩放、设备悬停出名字。
+- **报告列表去重**：同 `(scope, scope_id, 周期, 任务)` 只返回最新一份。
+- **演示心跳**：没有真实上报的边由 `jobs.demo_heartbeat()` 每 15 分钟补一条收件记录，只动 `last_seen` 与 `reports`。
 
 ## 告警怎么判定、怎么关掉
 
@@ -157,6 +165,9 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 公网只应暴露两条：`/api/v1/ingest/edge-report` 与 `/api/v1/health`。
 管理台与 Ollama 仅内网——`docker/Caddyfile` 就是这么配的，其余路径直接 404。
 
+这两条按客户端 IP 限速（收报 60 次/分、健康检查 120 次/分），超了回 429；
+管理员登录 10 分钟内错 5 次锁定 10 分钟，锁定期间同样回 429。
+
 告警相关：
 
 | 方法 | 路径 | 用途 |
@@ -190,7 +201,7 @@ python3 -m unittest discover -s tests -t . -v
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱）与 alert_state（人工动作） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板、建议文本按不可信数据处理 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`；建议文本去控制字符、截断并用「」分隔，prompt 明确它是数据不是指令 |
-| §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/日热力/词云/建议流）；Vue3 + Vite + ECharts，自写 M3 token |
+| §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/按日条带/词云/建议）；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth/alerts |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
@@ -200,12 +211,32 @@ python3 -m unittest discover -s tests -t . -v
 
 | 方案里的东西 | 现状 |
 |---|---|
-| GPU（P104 / CUDA） | 本机没有 NVIDIA 显卡，`nvidia-smi` 不存在；本地模型路径用桩服务验证了请求与 JSON 契约，CUDA offload 与 7B 延迟未实测 |
+| GPU（P104 / CUDA） | 本机没有 NVIDIA 显卡。模型已定 `qwen3.5:9b`（5.6 GB），但没有拉取也没有跑过：CPU 16 核跑 9B 达不到 §6.8 的 p95 ≤30 s，等 GPU 到位再测；本地模型路径目前只用桩服务验了请求与 JSON 契约 |
 | 备份落外接 USB 盘 | 路径可配（`CLOUD_BACKUP_HOST_DIR`）；已用独立目录模拟外接盘跑通备份与恢复演练，插真盘只改环境变量 |
 | 每周副本的异地存放 | 加密副本已做（gpg AES256），但"拷到另一块盘"属于运维动作，代码只负责生成 |
 | 多租户 | 明确不做（方案里也不在范围） |
+| 本地模型未跑 | 已定 `qwen3.5:9b`，镜像与模型都没拉；p95 与输出质量等 GPU |
+| 性能基线 | 本机 `/overview` p95 200 ms、`pg_dump` 0.3 s；目标机 72 h 未测 |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。
+
+端侧（另一个仓）还缺 §3 的 data_schema / DB API v3、§4 的 HyperVisor 聚合与上报、
+§5.10 的 headless、§8 的 device_salt 与 L1-out；云这边收得到契约，但真实终端还发不出来。
+
+演示模式下，另外两个边由 `cloud/jobs.demo_heartbeat()` 每 15 分钟补一次收件记录，
+只更新 `last_seen` 与 `reports`，不改日聚合、不伪造告警。接真机时把 `CLOUD_DEMO=0` 关掉。
+
+## 本机还能补的，和只能等硬件的
+
+| 项 | 本机能否完成 | 现状 |
+|---|---|---|
+| 逐设备 MQTT ACL | 能 | 用边 CA 现签一张测试证书连 8883，验「只能发自己前缀」 |
+| 性能基线（§11.2 / §11.3） | 能，已测一轮 | 边 `/overview` p95 338 ms、云 `/overview` p95 200 ms、`pg_dump` 0.3 s、各容器内存均低于限额；CPU/72 h 需在目标机复测 |
+| 同意开关落地 | 能 | `personalization` / `group_analysis` 已存库、demo 时写审计，但分析接口还没读它 |
+| 本地 9B 模型 | 不能 | 无 NVIDIA 显卡，模型 5.6 GB，等 GPU |
+| 双网 30 s / 10 用户轮换 / 72 h | 不能 | 需要三台终端 |
+| 端侧 §3 / §4 | 不在本仓 | 已分发给端仓 |
+| 备份异地 | 不能 | 需要第二块盘 |
 
 ## 目录
 

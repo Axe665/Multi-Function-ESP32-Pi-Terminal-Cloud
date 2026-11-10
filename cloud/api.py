@@ -58,7 +58,8 @@ def auth_state(request: Request) -> dict[str, Any]:
 def auth_login(body: dict[str, Any], response: Response) -> dict[str, Any]:
     result = auth.login(str(body.get("password", "")), str(body.get("code", "")))
     if not result["ok"]:
-        raise HTTPException(401, result["error"])
+        # 锁定期间回 429，前端能显示还要等多久
+        raise HTTPException(429 if result.get("wait") else 401, result["error"])
     response.set_cookie(auth.COOKIE, result["token"], httponly=True, samesite="lax",
                         max_age=auth.SESSION_TTL, path="/")
     return {"ok": True}
@@ -276,6 +277,12 @@ def wordcloud(days: int = Query(default=7, ge=1, le=30), scope: str | None = Non
 def advice(edge: str | None = None, risk: str | None = None,
            limit: int = Query(default=40, ge=1, le=200)) -> list[dict[str, Any]]:
     return store.advice(edge, risk, limit)
+
+
+@router.get("/daily/counts", dependencies=admin)
+def daily_counts(days: int = Query(default=7, ge=1, le=30),
+                 edge: str | None = None) -> list[dict[str, Any]]:
+    return store.daily_counts(days, edge)
 
 
 @router.get("/daily", dependencies=admin)

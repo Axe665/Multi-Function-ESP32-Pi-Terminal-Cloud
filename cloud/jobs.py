@@ -148,6 +148,31 @@ def run_restore_drill() -> dict[str, Any]:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
 
 
+def demo_heartbeat() -> dict[str, int]:
+    """演示模式：种子里的边没有真实上报，2 小时后会被判掉线。
+
+    这里让它们按小时补一条空的收件记录，只更新 last_seen 与 reports，
+    不改日聚合、不写告警。真上报覆盖同一张表，所以接真机后关掉 DEMO 即可。
+    """
+    if not config.DEMO:
+        return {"beats": 0}
+    now = store.now_ms()
+    cutoff = now - 90 * 60_000
+    beats = 0
+    with store.connect() as conn:
+        stale = [r["edge_id"] for r in conn.execute(
+            "SELECT edge_id FROM edges WHERE last_seen < %s", (cutoff,))]
+        for edge_id in stale:
+            conn.execute("UPDATE edges SET last_seen=%s WHERE edge_id=%s", (now, edge_id))
+            conn.execute("UPDATE devices SET last_seen=%s WHERE edge_id=%s", (now, edge_id))
+            conn.execute(
+                "INSERT INTO reports(edge_id, report_id, received_at, raw_bytes)"
+                " VALUES(%s,%s,%s,0) ON CONFLICT DO NOTHING",
+                (edge_id, f"demo-beat-{now // 3_600_000}", store._ms(now)))
+            beats += 1
+    return {"beats": beats}
+
+
 def prune(retention_days: int | None = None) -> dict[str, int]:
     days = retention_days or config.RETENTION_DAYS
     text_days = config.TEXT_RETENTION_DAYS

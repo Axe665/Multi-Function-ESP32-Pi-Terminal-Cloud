@@ -20,6 +20,29 @@ COOKIE = "mt_session"
 SESSION_TTL = 12 * 3600
 STEP = 30  # TOTP 步长
 
+# 登录失败锁定：10 分钟内错 5 次就等窗口过去。单管理员，进程内记着就够。
+FAIL_MAX = 5
+FAIL_WINDOW = 600
+_fails: list[float] = []
+
+
+def _prune_fails(now: float) -> None:
+    cutoff = now - FAIL_WINDOW
+    _fails[:] = [t for t in _fails if t >= cutoff]
+
+
+def locked_for(now: float | None = None) -> int:
+    """还要锁多少秒；0 表示没锁。"""
+    at = time.time() if now is None else now
+    _prune_fails(at)
+    if len(_fails) < FAIL_MAX:
+        return 0
+    return max(1, int(FAIL_WINDOW - (at - _fails[0])))
+
+
+def reset_lockout() -> None:
+    _fails.clear()
+
 
 # ---------------------------------------------------------------- TOTP
 
@@ -80,13 +103,23 @@ def check_password(password: str) -> bool:
 def login(password: str, code: str) -> dict[str, Any]:
     if not required():
         return {"ok": True, "token": issue_session()}
+    wait = locked_for()
+    if wait:
+        store.audit("anon", "auth.login", "admin", {"result": "locked", "wait": wait})
+        return {"ok": False, "error": f"失败次数过多，{wait // 60 + 1} 分钟后再试", "wait": wait}
+
+    def fail(reason: str, message: str) -> dict[str, Any]:
+        _fails.append(time.time())
+        store.audit("anon", "auth.login", "admin",
+                    {"result": reason, "fails": len(_fails), "window": FAIL_WINDOW})
+        return {"ok": False, "error": message}
+
     if not check_password(password):
-        store.audit("anon", "auth.login", "admin", {"result": "bad_password"})
-        return {"ok": False, "error": "口令不正确"}
+        return fail("bad_password", "口令不正确")
     if config.ADMIN_TOTP:
         if not verify_totp(config.ADMIN_TOTP, code):
-            store.audit("anon", "auth.login", "admin", {"result": "bad_totp"})
-            return {"ok": False, "error": "动态码不正确或已过期"}
+            return fail("bad_totp", "动态码不正确或已过期")
+    _fails.clear()
     store.audit("admin", "auth.login", "admin", {"result": "ok"})
     return {"ok": True, "token": issue_session()}
 

@@ -87,6 +87,15 @@ class GuardTest(unittest.TestCase):
         r = self.client.post("/api/v1/auth/login", json={"password": "x", "code": "000000"})
         self.assertEqual(r.status_code, 401)
 
+    def test_lockout_after_repeated_failures(self):
+        auth.reset_lockout()
+        for _ in range(auth.FAIL_MAX):
+            self.client.post("/api/v1/auth/login", json={"password": "x", "code": "000000"})
+        r = self.client.post("/api/v1/auth/login",
+                             json={"password": "correct horse", "code": "000000"})
+        self.assertEqual(r.status_code, 429, r.text)
+        auth.reset_lockout()
+
     def test_wrong_totp(self):
         r = self.client.post("/api/v1/auth/login",
                              json={"password": "correct horse", "code": "000000"})
