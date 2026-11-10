@@ -3,7 +3,15 @@
 端-边-云三层里的**云**：一台内网私有云。接收多个边节点上报的**日聚合**，
 做跨边对比、AI 解读和隐私审计。方向相反——它不看单个用户，只看群体。
 
-![总览](docs/screenshots/overview.png)
+## 界面（1900×1040，亮色）
+
+| 总览 | 边与设备 | 设备详情 |
+|---|---|---|
+| ![总览](docs/screenshots/overview.png) | ![边与设备](docs/screenshots/edges.png) | ![设备详情](docs/screenshots/devices.png) |
+| **对比** | **AI 报告** | **隐私审计** |
+| ![对比](docs/screenshots/compare.png) | ![AI 报告](docs/screenshots/reports.png) | ![隐私审计](docs/screenshots/privacy.png) |
+
+截图是按 1900×1040 截的；页面用 `clamp` 栅格，1920/1440/1366 下总览也是整屏不滚动。
 
 ## 边、云两仓的分工
 
@@ -122,6 +130,9 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 - **总览重做**：首屏 6 块图（带边名的全网拓扑、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5）+ 右栏待处理与摘要；拓扑可缩放、设备悬停出名字。
 - **报告列表去重**：同 `(scope, scope_id, 周期, 任务)` 只返回最新一份。
 - **演示心跳**：没有真实上报的边由 `jobs.demo_heartbeat()` 每 15 分钟补一条收件记录，只动 `last_seen` 与 `reports`。
+- **边关掉群体分析后，这里只收到在线/健康计数**：边侧挡在 `/overview` 与词云，云不替它补，也不会凭空出现分设备走势。
+- **截图重截**：`docs/screenshots/` 是 1900×1040 的新版，README 里六页并排。
+
 
 ## 告警怎么判定、怎么关掉
 
@@ -230,9 +241,9 @@ python3 -m unittest discover -s tests -t . -v
 
 | 项 | 本机能否完成 | 现状 |
 |---|---|---|
-| 逐设备 MQTT ACL | 能 | 用边 CA 现签一张测试证书连 8883，验「只能发自己前缀」 |
+| 逐设备 MQTT ACL | ✅ 已完成（在边仓） | `scripts/verify_acl.sh`：边 CA 现签证书连 8883，自己前缀能发能收，别人前缀与通配订阅被拒 |
 | 性能基线（§11.2 / §11.3） | 能，已测一轮 | 边 `/overview` p95 338 ms、云 `/overview` p95 200 ms、`pg_dump` 0.3 s、各容器内存均低于限额；CPU/72 h 需在目标机复测 |
-| 同意开关落地 | 能 | `personalization` / `group_analysis` 已存库、demo 时写审计，但分析接口还没读它 |
+| 同意开关落地 | ✅ 已完成（在边仓） | 关 `group_analysis` → 边回「样本不足」；关 `personalization` → 报表不带 advice/词频；变更写审计 |
 | 本地 9B 模型 | 不能 | 无 NVIDIA 显卡，模型 5.6 GB，等 GPU |
 | 双网 30 s / 10 用户轮换 / 72 h | 不能 | 需要三台终端 |
 | 端侧 §3 / §4 | 不在本仓 | 已分发给端仓 |
