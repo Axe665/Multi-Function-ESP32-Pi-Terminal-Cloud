@@ -119,12 +119,14 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 | 每日全网报告 | 24 h 没有新报告就补一份 | 同上 |
 | 隐私审计 | k 分布、抑制计数、拦截计数、字段白名单、导出留痕 | `tests/test_ingest.py` |
 | 告警状态机 | 日聚合 z 推出的告警，确认、静音、取消静音都写审计 | `tests/test_alerts.py` |
-| 公网最小暴露 | 只有 `/ingest/edge-report` 与 `/health` 不要求登录；`/ollama/*` 只在内网站点 | `docker/Caddyfile` |
+| 公网最小暴露 | 8443（边→云 mTLS 口）只放行 `/ingest/edge-report` 与 `/health`，其余 403；`/ollama/*` 只在内网站点 | `docker/Caddyfile`，实测见 `scripts/verify_exposure.sh` |
 | mDNS 广播 | 云广播 `_orpi-cloud._tcp`（v/id/port/ca_fp），边据此发现云 | `cloud/mdns.py`，容器内实测 `on: true` |
 | 演示模式 | `demo` 与构建号随 `/health` 暴露，侧栏底部标注「演示数据」；seed 写审计 | `cloud/seed.py`、`cloud/api.py` |
 
 ### 最近补的
 
+- **公网边界有自检了**：`scripts/verify_exposure.sh` 拿 cloud-ca 签的边证书连 8443，逐条验证「两条路由通、其余 403、不带客户端证书连不上」，
+  顺带反证 443 的内网管理 API 没被一起挡住。改 Caddyfile 之后跑一次就知道有没有多开。
 - **公网两条路由限速**：`ingest` 60 次/分、`health` 120 次/分，按客户端 IP，超了 429。
 - **管理员登录锁定**：10 分钟内错 5 次锁 10 分钟，锁定期间也回 429，写入 `auth.login` 审计。
 - **总览重做**：首屏 6 块图（带边名的全网拓扑、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5）+ 右栏待处理与摘要；拓扑可缩放、设备悬停出名字。
@@ -174,7 +176,17 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 完整定义见 [`contracts/openapi/cloud.yaml`](contracts/openapi/cloud.yaml)，运行时 Swagger 在 `/api/docs`。
 
 公网只应暴露两条：`/api/v1/ingest/edge-report` 与 `/api/v1/health`。
-管理台与 Ollama 仅内网——`docker/Caddyfile` 就是这么配的，其余路径直接 404。
+管理台与 Ollama 仅内网——`docker/Caddyfile` 就是这么配的，其余路径在 8443 上直接 403。
+
+**公网入口是 8443**（要求 cloud-ca 签发的客户端证书）。443 是内网管理台和前端，别映射到公网。
+`scripts/verify_exposure.sh` 用 `docker/certs/` 里 cloud-ca 签的边证书逐条实测：
+
+```
+[PASS] 健康检查可达（200）        [PASS] 上报路由可达，交给 api 判令牌与载荷（422）
+[PASS] /api/v1/overview 被挡（403） [PASS] /api/v1/edges 被挡（403）
+[PASS] /api/v1/privacy/audit 被挡（403） … [PASS] 不带客户端证书连不上（要求 mTLS）
+[PASS] 内网入口的管理 API 照旧（200）
+```
 
 这两条按客户端 IP 限速（收报 60 次/分、健康检查 120 次/分），超了回 429；
 管理员登录 10 分钟内错 5 次锁定 10 分钟，锁定期间同样回 429。
@@ -201,7 +213,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**30 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
+**31 个用例**：摄取边界、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
@@ -244,6 +256,7 @@ python3 -m unittest discover -s tests -t . -v
 | 逐设备 MQTT ACL | ✅ 已完成（在边仓） | `scripts/verify_acl.sh`：边 CA 现签证书连 8883，自己前缀能发能收，别人前缀与通配订阅被拒 |
 | 性能基线（§11.2 / §11.3） | 能，已测一轮 | 边 `/overview` p95 338 ms、云 `/overview` p95 200 ms、`pg_dump` 0.3 s、各容器内存均低于限额；CPU/72 h 需在目标机复测 |
 | 同意开关落地 | ✅ 已完成（在边仓） | 关 `group_analysis` → 边回「样本不足」；关 `personalization` → 报表不带 advice/词频；变更写审计 |
+| 公网边界自检 | ✅ 已完成 | `scripts/verify_exposure.sh`：8443 只通两条路由，其余 403，无客户端证书连不上；443 内网照旧 |
 | 本地 9B 模型 | 不能 | 无 NVIDIA 显卡，模型 5.6 GB，等 GPU |
 | 双网 30 s / 10 用户轮换 / 72 h | 不能 | 需要三台终端 |
 | 端侧 §3 / §4 | 不在本仓 | 已分发给端仓 |
