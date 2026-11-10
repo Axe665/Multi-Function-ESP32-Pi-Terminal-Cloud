@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, fmtDay, fmtNum, fmtTime } from '../api'
 import PageHeader from '../components/PageHeader.vue'
+import ChartBox from '../components/ChartBox.vue'
+import { chartTokens, useTheme } from '../lib/theme'
 import { useSnack } from '../components/useSnack'
 
 const list = ref([])
@@ -78,6 +80,26 @@ async function generate() {
 
 onMounted(load)
 
+const { theme } = useTheme()
+const tk = computed(() => chartTokens(theme.value))
+const taskOption = computed(() => {
+  const t = tk.value
+  const rows = byTask.value.slice().reverse()
+  return {
+    grid: { left: 4, right: 26, top: 6, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: t.split } },
+             axisLabel: { fontSize: 10, color: t.axis } },
+    yAxis: { type: 'category', data: rows.map((r) => r.label),
+             axisLabel: { fontSize: 11, color: t.text }, axisLine: { show: false }, axisTick: { show: false } },
+    series: [{
+      type: 'bar', data: rows.map((r) => r.n), barMaxWidth: 16,
+      itemStyle: { color: t.line, borderRadius: [0, 3, 3, 0] },
+      label: { show: true, position: 'right', fontSize: 10, color: t.axis },
+    }],
+  }
+})
+
 const byTask = computed(() =>
   Object.keys(taskLabel).map((k) => ({
     key: k,
@@ -121,7 +143,7 @@ const budget = computed(() => health.value?.api_budget ?? 0)
           :class="{ 'rep--active': r.id === active }"
           @click="open(r.id)"
         >
-          <span class="rep-title">{{ taskLabel[r.task] || '趋势解读' }} · {{ scopeLabel[r.scope] || r.scope }}</span>
+          <span class="rep-title">{{ taskLabel[r.task] || '趋势解读' }}，{{ scopeLabel[r.scope] || r.scope }}{{ r.scope_id ? '，' + r.scope_id : '' }}</span>
           <span class="rep-meta">
             {{ fmtDay(r.period_start) }} – {{ fmtDay(r.period_end) }}，{{ r.model }}，{{ fmtTime(r.created_at) }} 生成
           </span>
@@ -165,22 +187,14 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       </template>
       <p v-else class="md-muted">选择一份报告查看详情。</p>
     </section>
+
   </div>
 
-  <div class="split-2">
+    <div class="split-2">
     <section class="md-card">
       <div class="section-head"><h2>任务分布</h2><span class="md-muted">{{ list.length }} 份报告</span></div>
-      <div class="md-list">
-        <div v-for="t in byTask" :key="t.key" class="md-list-row">
-          <div class="md-grow">
-            <div>{{ t.label }}</div>
-            <div class="md-mono md-muted">{{ t.key }}</div>
-          </div>
-          <span class="md-mono">{{ t.n }}</span>
-        </div>
-      </div>
+      <ChartBox :option="taskOption" height="180px" />
     </section>
-
     <section class="md-card">
       <div class="section-head"><h2>成本与缓存</h2><span class="md-muted">公有 API 模式才计费</span></div>
       <div class="md-list">
@@ -191,29 +205,23 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       </div>
     </section>
   </div>
+
+
 </template>
 
 <style scoped>
 .error { color: var(--md-error); margin-bottom: var(--space-3); }
-.split {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-  gap: var(--space-4); align-items: start;
-}
+.split { display: grid; gap: var(--space-4); }
+.rep-list { display: flex; gap: var(--space-2); overflow-x: auto; max-height: none; }
+.rep { min-width: 240px; flex: 0 0 auto; }
 .split-2 {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4); margin-top: var(--space-4); align-items: start;
+  gap: var(--space-4); margin-top: var(--space-4); align-items: stretch;
 }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
-.rep-list {
-  display: grid;
-  gap: 2px;
-  max-height: 560px;
-  overflow-y: auto;
-}
 .rep {
   display: grid;
   gap: 2px;
-  width: 100%;
   padding: var(--space-2) var(--space-3);
   text-align: left;
   background: none;

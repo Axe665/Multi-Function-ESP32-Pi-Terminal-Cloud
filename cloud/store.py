@@ -326,6 +326,19 @@ def metric_labels() -> list[dict[str, Any]]:
     return [_row(r) for r in rows]
 
 
+def daily_counts(days: int = 7, edge_id: str | None = None) -> list[dict[str, Any]]:
+    """按天 × 边的行数，给总览的堆叠柱用；不拉明细。"""
+    since = (dt.date.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
+    sql = ("SELECT day, edge_id, COUNT(*) AS n FROM telemetry_daily WHERE day >= %s")
+    args: list[Any] = [since]
+    if edge_id:
+        sql += " AND edge_id=%s"
+        args.append(edge_id)
+    sql += " GROUP BY day, edge_id ORDER BY day, edge_id"
+    with connect() as conn:
+        return [_row(r) for r in conn.execute(sql, args)]
+
+
 def daily_rows(limit: int = 200, edge_id: str | None = None) -> list[dict[str, Any]]:
     sql = "SELECT * FROM telemetry_daily"
     args: list[Any] = []
@@ -511,12 +524,24 @@ def _shift(day: str, delta: int) -> str:
 
 
 def reports(limit: int = 30) -> list[dict[str, Any]]:
+    """同 (scope, scope_id, 周期, 任务) 只返回最新一份。
+
+    缓存只保 24 h，过了就允许重新生成，旧记录留在库里但不再刷列表——
+    否则同一周期点几次「重新生成」，列表就全是同一条。
+    """
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, scope, scope_id, period_start, period_end, model, prompt_hash,"
-            " tokens_in, tokens_out, created_at,"
-            " COALESCE(content::jsonb->>'task','weekly_narrative') AS task"
-            " FROM ai_reports ORDER BY created_at DESC LIMIT %s",
+            """SELECT * FROM (
+                   SELECT DISTINCT ON (scope, COALESCE(scope_id,''), period_start, period_end,
+                                       COALESCE(content::jsonb->>'task','weekly_narrative'))
+                          id, scope, scope_id, period_start, period_end, model, prompt_hash,
+                          tokens_in, tokens_out, created_at,
+                          COALESCE(content::jsonb->>'task','weekly_narrative') AS task
+                   FROM ai_reports
+                   ORDER BY scope, COALESCE(scope_id,''), period_start, period_end,
+                            COALESCE(content::jsonb->>'task','weekly_narrative'), created_at DESC
+               ) latest
+               ORDER BY created_at DESC LIMIT %s""",
             (limit,)).fetchall()
     return [_row(r) for r in rows]
 

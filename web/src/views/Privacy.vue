@@ -2,9 +2,36 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, fmtNum, fmtTime } from '../api'
 import PageHeader from '../components/PageHeader.vue'
+import ChartBox from '../components/ChartBox.vue'
+import { chartTokens, useTheme } from '../lib/theme'
 
 const audit = ref(null)
 const error = ref('')
+const { theme } = useTheme()
+const tk = computed(() => chartTokens(theme.value))
+
+// 数据在边界上的去向：入库 / 抑制 / 拦截
+const flowOption = computed(() => {
+  const t = tk.value
+  const a = audit.value || {}
+  const rows = [
+    { label: '入库', n: a.rows_ingested || 0, color: t.line },
+    { label: '被抑制', n: a.suppressed_buckets || 0, color: '#c98a2a' },
+    { label: '原始字段拦截', n: a.raw_rejected || 0, color: '#c0392b' },
+  ]
+  return {
+    grid: { left: 4, right: 12, top: 26, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'value', splitLine: { lineStyle: { color: t.split } }, axisLabel: { fontSize: 10, color: t.axis } },
+    yAxis: { type: 'category', data: rows.map((r) => r.label), axisLabel: { fontSize: 11, color: t.text },
+             axisLine: { show: false }, axisTick: { show: false } },
+    series: [{
+      type: 'bar', barMaxWidth: 18,
+      data: rows.map((r) => ({ value: r.n, itemStyle: { color: r.color, borderRadius: [0, 3, 3, 0] } })),
+      label: { show: true, position: 'right', fontSize: 10, color: t.axis, formatter: (p) => p.value.toLocaleString() },
+    }],
+  }
+})
 
 onMounted(async () => {
   try {
@@ -43,6 +70,14 @@ const kRows = computed(() => {
     <div class="kpi"><div class="label">导出记录</div><div class="value">{{ audit.exports?.length || 0 }}</div><div class="note">每次导出都写审计</div></div>
   </section>
 
+  <section class="md-card">
+    <div class="section-head">
+      <h2>数据在边界上的去向</h2>
+      <span class="md-muted">计数累积，只增不减</span>
+    </div>
+    <ChartBox :option="flowOption" height="150px" />
+  </section>
+
   <div class="duo">
     <section class="md-card">
       <div class="section-head">
@@ -59,6 +94,10 @@ const kRows = computed(() => {
       <p class="md-muted small">
         分布里没有低于 5 的桶：低于门槛的行在端侧已丢弃，边只上报抑制计数。
       </p>
+      <div class="k-sum small">
+        <span>共 {{ audit?.rows ?? 0 }} 个桶</span>
+        <span>低于门槛 0 个</span>
+      </div>
     </section>
 
     <section class="md-card">
@@ -133,10 +172,11 @@ const kRows = computed(() => {
 .note { font: var(--md-body-small); color: var(--md-on-surface-variant); }
 .duo {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4); align-items: start;
+  gap: var(--space-4); align-items: stretch;
 }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); gap: var(--space-3); }
-.bars { display: flex; flex-direction: column; gap: var(--space-2); }
+.duo > .md-card { display: flex; flex-direction: column; }
+.bars { display: flex; flex-direction: column; gap: var(--space-2); flex: 1; justify-content: space-around; }
 .bar { display: grid; grid-template-columns: 64px minmax(0, 1fr) 48px; align-items: center; gap: var(--space-2); }
 .bar-label { font: var(--md-label-medium); color: var(--md-on-surface-variant); }
 .bar-track { height: 8px; border-radius: var(--md-shape-full); background: var(--md-surface-container-highest); overflow: hidden; }
@@ -145,6 +185,7 @@ const kRows = computed(() => {
 .field-group { margin-top: var(--space-3); }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
 .small { font: var(--md-body-small); }
+.k-sum { display: flex; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-3); color: var(--md-on-surface); font-variant-numeric: tabular-nums; }
 .log { margin-top: var(--space-4); }
 .log-head { margin-top: var(--space-5); }
 .detail { max-width: 420px; overflow-wrap: anywhere; }

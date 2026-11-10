@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import api, auth, config, mdns, store
@@ -28,6 +30,11 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(mdns.mdns.stop)
 
 
+# 公网只开两条路，限速也只需要管这两条：每 IP 每分钟
+RATE = {"/api/v1/ingest/edge-report": 60, "/api/v1/health": 120}
+_hits: dict[tuple[str, str], list[float]] = {}
+
+
 def create_app() -> FastAPI:
     store.init_db()
     if os.environ.get("CLOUD_AUTOSEED") == "1" and not store.edges():
@@ -36,6 +43,20 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Modular Terminal Cloud", version="1.0.0",
                   description=DESCRIPTION, docs_url="/api/docs", redoc_url=None,
                   lifespan=lifespan)
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        limit = RATE.get(request.url.path)
+        if limit and request.method != "OPTIONS":
+            now = time.time()
+            key = (request.url.path, request.client.host if request.client else "-")
+            seen = [t for t in _hits.get(key, []) if now - t < 60]
+            if len(seen) >= limit:
+                return JSONResponse({"detail": "请求过于频繁，稍后再试"}, status_code=429,
+                                    headers={"Retry-After": "60"})
+            seen.append(now)
+            _hits[key] = seen
+        return await call_next(request)
+
     app.include_router(api.router)
     if config.STATIC.is_dir():
         app.mount("/", StaticFiles(directory=config.STATIC, html=True), name="static")

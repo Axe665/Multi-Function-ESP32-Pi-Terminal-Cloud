@@ -146,15 +146,15 @@ const wordOption = computed(() => {
       <ChartBox :option="seriesOption" height="260px" />
     </section>
 
-    <div class="duo">
-      <section class="md-card">
-        <div class="section-head">
-          <h2>时段热力图</h2>
-          <span class="md-muted">{{ label(metric) }}（{{ unit(metric) }}）</span>
-        </div>
-        <ChartBox :option="heatOption" height="280px" />
-      </section>
+    <section class="md-card strip">
+      <div class="section-head">
+        <h2>按日聚合</h2>
+        <span class="md-muted">{{ label(metric) }}，色深为当日均值（云端没有小时粒度）</span>
+      </div>
+      <ChartBox :option="heatOption" height="140px" />
+    </section>
 
+    <div class="duo">
       <section class="md-card">
         <div class="section-head">
           <h2>词云</h2>
@@ -162,9 +162,8 @@ const wordOption = computed(() => {
         </div>
         <ChartBox :option="wordOption" height="280px" />
       </section>
-    </div>
 
-    <section class="md-card advice">
+      <section class="md-card advice">
       <div class="section-head">
         <h2>建议</h2>
         <span class="md-muted">最近 {{ advice.length }} 条</span>
@@ -181,7 +180,8 @@ const wordOption = computed(() => {
         </div>
         <p v-if="!advice.length" class="md-muted">这台设备最近没有建议。</p>
       </div>
-    </section>
+      </section>
+    </div>
   </template>
 </template>
 
@@ -191,11 +191,14 @@ const wordOption = computed(() => {
   display: flex; justify-content: space-between; align-items: baseline;
   gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: wrap;
 }
+.duo > .md-card { display: flex; flex-direction: column; }
+.duo .md-list { flex: 1; justify-content: space-around; }
 .duo {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4); margin-top: var(--space-4); align-items: start;
+  gap: var(--space-4); margin-top: var(--space-4); align-items: stretch;
 }
-.advice { margin-top: var(--space-4); }
+.advice { margin-top: 0; }
+.strip { margin-top: var(--space-4); }
 .small { font: var(--md-body-small); }
 @media (max-width: 1000px) {
   .duo { grid-template-columns: minmax(0, 1fr); }

@@ -2,11 +2,35 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, fmtTime } from '../api'
 import PageHeader from '../components/PageHeader.vue'
+import ChartBox from '../components/ChartBox.vue'
+import { chartTokens, useTheme } from '../lib/theme'
 
 const edges = ref([])
 const devices = ref([])
 const activeEdge = ref('')
 const error = ref('')
+const { theme } = useTheme()
+const tk = computed(() => chartTokens(theme.value))
+
+// 每边在线设备与有数据天数，一眼看出谁掉队
+const compareOption = computed(() => {
+  const t = tk.value
+  return {
+    grid: { left: 4, right: 8, top: 28, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { top: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 11, color: t.axis } },
+    xAxis: { type: 'category', data: edges.value.map((e) => e.name),
+             axisLabel: { fontSize: 11, color: t.axis }, axisLine: { lineStyle: { color: t.split } }, axisTick: { show: false } },
+    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: t.split } },
+             axisLabel: { fontSize: 10, color: t.axis } },
+    series: [
+      { name: '在线设备', type: 'bar', barMaxWidth: 26,
+        data: edges.value.map((e) => e.online_devices), itemStyle: { color: t.line, borderRadius: [3, 3, 0, 0] } },
+      { name: '设备总数', type: 'bar', barMaxWidth: 26,
+        data: edges.value.map((e) => e.devices), itemStyle: { color: t.split, borderRadius: [3, 3, 0, 0] } },
+    ],
+  }
+})
 
 // 文档 §6.4 的两级下钻：先点边，再看这台边下面的设备
 const shown = computed(() =>
@@ -33,6 +57,14 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
   </PageHeader>
 
   <p v-if="error" class="error">{{ error }}</p>
+
+  <section class="md-card">
+    <div class="section-head">
+      <h2>边对比</h2>
+      <span class="md-muted">在线设备 / 设备总数，最近 7 天</span>
+    </div>
+    <ChartBox :option="compareOption" height="150px" />
+  </section>
 
   <section class="md-card">
     <div class="section-head">

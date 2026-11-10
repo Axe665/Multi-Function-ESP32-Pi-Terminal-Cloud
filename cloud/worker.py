@@ -17,7 +17,8 @@ def _now() -> float:
 
 
 def _scheduler_loop() -> None:
-    last = {"rollup": 0.0, "words": 0.0, "report": 0.0, "prune": 0.0, "backup": 0.0, "drill": 0.0}
+    last = {"rollup": 0.0, "words": 0.0, "report": 0.0, "prune": 0.0, "backup": 0.0, "drill": 0.0,
+            "beat": 0.0}
     while True:
         try:
             now = _now()
@@ -25,6 +26,8 @@ def _scheduler_loop() -> None:
                 jobs.refresh_rollup(); last["rollup"] = now
             if now - last["words"] > 600:
                 jobs.rebuild_wordfreq(); last["words"] = now
+            if now - last["beat"] > 900:
+                jobs.demo_heartbeat(); last["beat"] = now
             if now - last["report"] > 1800:
                 jobs.maybe_daily_report(); last["report"] = now
             if now - last["prune"] > 6 * 3600:
