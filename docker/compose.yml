@@ -118,7 +118,8 @@ services:
       POSTGRES_USER: cloud
       POSTGRES_PASSWORD: ${CLOUD_DB_PASSWORD:-cloud}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 默认命名卷；跑过 scripts/setup_encrypted_volume.sh 后把 CLOUD_PGDATA 指到 LUKS 挂载点
+      - ${CLOUD_PGDATA:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
       interval: 10s
