@@ -249,6 +249,8 @@ python3 -m unittest discover -s tests -t . -v
 | 本地模型未跑 | 已定 `qwen3.5:9b`，镜像与模型都没拉；p95 与输出质量等 GPU |
 | 性能基线 | 本机 `/overview` p95 200 ms、`pg_dump` 0.3 s；目标机 72 h 未测 |
 | Postgres 卷静态加密 | 需要宿主机 LUKS（或加密块设备）；代码只保证备份用 gpg AES256。部署时把 `pgdata` 落到已加密的挂载点 |
+| 模型 SHA256 清单 | `/health` 会报 Ollama 的 `digest`，配 `CLOUD_OLLAMA_SHA256` 才比对；没有随包清单文件 |
+| AI 报告生成状态 | 生成是同步的；报告列表显示模型与 token，没有单独的排队/失败状态字段 |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。
 
