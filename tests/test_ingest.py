@@ -56,6 +56,14 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(r.json()["detail"]["code"], "RAW_PAYLOAD_REJECTED")
         self.assertGreaterEqual(store.counters().get("raw_rejected", 0), 1)
 
+    def test_personalization_flag_accepted(self):
+        payload = example()
+        payload["report_id"] = "consent-off-0001"
+        payload["privacy"]["personalization"] = False
+        r = self.client.post("/api/v1/ingest/edge-report", json=payload)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["accepted"])
+
     def test_low_k_rejected(self):
         payload = example()
         payload["report_id"] = "lowk-test-0001"

@@ -59,6 +59,8 @@ class ReportPrivacy(Strict):
     suppressed_buckets: int = 0
     raw_rejected: int = 0
     subjects_total: int = 0
+    # 边在关掉个性化时带 false（文档 §8.5）；可选字段，老边不带也能收
+    personalization: bool = True
 
 
 class Period(Strict):
