@@ -85,6 +85,7 @@ docker compose -f compose.yml -f compose.amd.yml    --profile ai up -d   # AMD/R
 ```bash
 export CLOUD_ADMIN_PASSWORD='换成你的口令'
 export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secret_hint())" 生成'
+# 两个都要设：只配口令不配 TOTP 会拒绝登录（文档 §6.5）
 ```
 
 ## 数据流
@@ -221,7 +222,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**39 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
+**40 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
