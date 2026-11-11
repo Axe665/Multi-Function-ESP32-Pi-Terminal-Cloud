@@ -234,7 +234,7 @@ cd docker && docker compose up -d postgres
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**42 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
+**43 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`、min/max 拒收）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、模型 digest 写入清单并复用、报告生成状态、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
