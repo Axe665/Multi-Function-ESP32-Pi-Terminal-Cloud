@@ -105,8 +105,9 @@ def _summary(scope: str, scope_id: str | None, days: int = 7,
 
     return {
         "scope": scope, "scope_id": scope_id, "from": start, "to": end,
-        "edges": [e["edge_id"] for e in store.edges()],
-        "devices": len(store.devices(scope_id if scope == "edge" else None)),
+        "edges": [e["edge_id"] for e in store.edges() if e.get("group_analysis", True)],
+        "devices": len([d for d in store.devices(scope_id if scope == "edge" else None)
+                        if d.get("group_analysis", True)]),
         "metrics": metrics,
         "advice_top": [
             {"text": _untrusted(a["text"]), "risk": a["risk"], "device": a["device_id"]}
@@ -122,8 +123,8 @@ def _summary(scope: str, scope_id: str | None, days: int = 7,
 def _advice_counts(scope_id: str | None) -> list[dict[str, Any]]:
     with store.connect() as conn:
         rows = conn.execute(
-            """SELECT text, risk, COUNT(*) AS n FROM advice
-               WHERE (%s::text IS NULL OR edge_id = %s)
+            f"""SELECT text, risk, COUNT(*) AS n FROM advice
+               WHERE (%s::text IS NULL OR edge_id = %s) AND {store.VISIBLE_EDGES}
                GROUP BY text, risk ORDER BY n DESC LIMIT 6""",
             (scope_id, scope_id)).fetchall()
     return [{"text": r["text"], "risk": r["risk"], "count": r["n"]} for r in rows]
@@ -133,8 +134,9 @@ def _by_edge() -> list[dict[str, Any]]:
     """按边聚合出各指标的均值，供 fleet_compare 用。"""
     with store.connect() as conn:
         rows = conn.execute(
-            """SELECT edge_id, metric, AVG(mean) AS mean, MAX(ABS(z)) AS z
-               FROM telemetry_daily GROUP BY edge_id, metric""").fetchall()
+            f"""SELECT edge_id, metric, AVG(mean) AS mean, MAX(ABS(z)) AS z
+               FROM telemetry_daily WHERE {store.VISIBLE_EDGES}
+               GROUP BY edge_id, metric""").fetchall()
     out: dict[str, dict] = {}
     for r in rows:
         out.setdefault(r["edge_id"], {"edge_id": r["edge_id"], "metrics": []})
@@ -351,7 +353,9 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
         "prompt": PROMPT + json.dumps(summary, ensure_ascii=False),
         "stream": False,
         "format": "json",
-        "options": {"num_ctx": 4096, "temperature": 0.2},
+        # 文档 §6.1/§6.8：关 thinking、4K 上下文、输出 ≤1k token
+        "think": False,
+        "options": {"num_ctx": 4096, "temperature": 0.2, "num_predict": 1000},
     }
     for attempt in range(3):
         try:
@@ -369,6 +373,37 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             if attempt == 2:
                 return None
+
+
+_model_cache: dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def model_status() -> dict[str, Any]:
+    """文档 §6.8：模型文件带 SHA256 清单。配了 CLOUD_OLLAMA_SHA256 就比对 digest。"""
+    import time
+
+    if _model_cache["value"] and time.time() - _model_cache["at"] < 60:
+        return _model_cache["value"]
+    out: dict[str, Any] = {"name": config.OLLAMA_MODEL, "expected": config.OLLAMA_SHA256 or None,
+                           "digest": None, "match": None, "reachable": False}
+    try:
+        with httpx.Client(timeout=1.5, trust_env=False) as c:
+            r = c.get(f"{config.OLLAMA_URL}/api/tags")
+            r.raise_for_status()
+            items = r.json().get("models") or []
+    except (httpx.HTTPError, ValueError, KeyError, AttributeError):
+        _model_cache.update(at=time.time(), value=out)
+        return out
+    out["reachable"] = True
+    item = next((m for m in items
+                 if m.get("name") == config.OLLAMA_MODEL
+                 or m.get("model") == config.OLLAMA_MODEL), None)
+    if item:
+        out["digest"] = item.get("digest")
+    if out["expected"]:
+        out["match"] = out["digest"] == out["expected"]
+    _model_cache.update(at=time.time(), value=out)
+    return out
 
 
 def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,

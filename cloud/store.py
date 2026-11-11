@@ -24,8 +24,11 @@ CREATE TABLE IF NOT EXISTS edges (
   name      TEXT,
   cert_fp   TEXT,
   last_seen BIGINT,      -- 毫秒时间戳，INTEGER 装不下（文档写的是 INTEGER，这里是必要的修正）
-  version   TEXT
+  version   TEXT,
+  group_analysis BOOLEAN NOT NULL DEFAULT TRUE
 );
+-- 老库补列：群体分析开关随 edge-report 一起上报（文档 §8.5）
+ALTER TABLE edges ADD COLUMN IF NOT EXISTS group_analysis BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE TABLE IF NOT EXISTS devices (
   device_id    TEXT PRIMARY KEY,
@@ -207,10 +210,13 @@ def ingest_report(payload: dict[str, Any]) -> dict[str, Any]:
         if cur.rowcount == 0:
             return {"duplicate": True, "rows": 0}
         conn.execute(
-            """INSERT INTO edges(edge_id, name, last_seen, version) VALUES(%s,%s,%s,%s)
+            """INSERT INTO edges(edge_id, name, last_seen, version, group_analysis)
+               VALUES(%s,%s,%s,%s,%s)
                ON CONFLICT(edge_id) DO UPDATE SET
-                 name=EXCLUDED.name, last_seen=EXCLUDED.last_seen""",
-            (edge_id, payload.get("edge_name") or edge_id, now, "1.0.0"))
+                 name=EXCLUDED.name, last_seen=EXCLUDED.last_seen,
+                 group_analysis=EXCLUDED.group_analysis""",
+            (edge_id, payload.get("edge_name") or edge_id, now, "1.0.0",
+             payload["privacy"].get("group_analysis", True)))
         for d in payload["devices"]:
             conn.execute(
                 """INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen)
@@ -268,13 +274,14 @@ def edges() -> list[dict[str, Any]]:
 
 
 def devices(edge_id: str | None = None) -> list[dict[str, Any]]:
-    """online 由 last_seen 现算，库里不再存这一列。"""
-    sql = "SELECT * FROM devices"
+    """online 由 last_seen 现算，库里不再存这一列；带上是哪条边的开关状态。"""
+    sql = ("SELECT d.*, e.group_analysis FROM devices d"
+           " JOIN edges e ON e.edge_id=d.edge_id")
     args: tuple = ()
     if edge_id:
-        sql += " WHERE edge_id=%s"
+        sql += " WHERE d.edge_id=%s"
         args = (edge_id,)
-    sql += " ORDER BY edge_id, device_id"
+    sql += " ORDER BY d.edge_id, d.device_id"
     cutoff = now_ms() - 2 * 3600_000
     with connect() as conn:
         rows = [_row(r) for r in conn.execute(sql, args)]
@@ -283,8 +290,12 @@ def devices(edge_id: str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+# 文档 §8.5：群体分析关掉的边只留在线/健康计数，分析数据一律不参与查询。
+VISIBLE_EDGES = "edge_id IN (SELECT edge_id FROM edges WHERE group_analysis)"
+
+
 def series(edge_id: str | None, device_id: str | None, metric: str) -> list[dict[str, Any]]:
-    sql = "SELECT day, device_id, edge_id, mean, z, k FROM telemetry_daily WHERE metric=%s"
+    sql = f"SELECT day, device_id, edge_id, mean, z, k FROM telemetry_daily WHERE metric=%s AND {VISIBLE_EDGES}"
     args: list[Any] = [metric]
     if edge_id:
         sql += " AND edge_id=%s"; args.append(edge_id)
@@ -306,7 +317,7 @@ def heatmap(edge_id: str, device_id: str, metric: str) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             "SELECT day, mean, z FROM telemetry_daily"
-            " WHERE edge_id=%s AND device_id=%s AND metric=%s",
+            f" WHERE edge_id=%s AND device_id=%s AND metric=%s AND {VISIBLE_EDGES}",
             (edge_id, device_id, metric)).fetchall()
     return [{"day": r["day"].isoformat() if isinstance(r["day"], dt.date) else r["day"],
              "mean": r["mean"], "z": r["z"]} for r in rows]
@@ -316,20 +327,21 @@ def metric_labels() -> list[dict[str, Any]]:
     """云收到过哪些指标 —— 前端下拉框与 AI 的措辞都从这里来。"""
     with connect() as conn:
         rows = conn.execute(
-            """SELECT metric,
+            f"""SELECT metric,
                       MAX(COALESCE(NULLIF(label,''), metric)) AS label,
                       MAX(COALESCE(unit,'')) AS unit,
                       MIN(COALESCE(module_id,0)) AS module_id,
                       COUNT(DISTINCT device_id) AS devices,
                       COUNT(*) AS rows
-               FROM telemetry_daily GROUP BY metric ORDER BY metric""").fetchall()
+               FROM telemetry_daily WHERE {VISIBLE_EDGES} GROUP BY metric ORDER BY metric""").fetchall()
     return [_row(r) for r in rows]
 
 
 def daily_counts(days: int = 7, edge_id: str | None = None) -> list[dict[str, Any]]:
     """按天 × 边的行数，给总览的堆叠柱用；不拉明细。"""
     since = (dt.date.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
-    sql = ("SELECT day, edge_id, COUNT(*) AS n FROM telemetry_daily WHERE day >= %s")
+    sql = (f"SELECT day, edge_id, COUNT(*) AS n FROM telemetry_daily "
+           f"WHERE day >= %s AND {VISIBLE_EDGES}")
     args: list[Any] = [since]
     if edge_id:
         sql += " AND edge_id=%s"
@@ -340,10 +352,10 @@ def daily_counts(days: int = 7, edge_id: str | None = None) -> list[dict[str, An
 
 
 def daily_rows(limit: int = 200, edge_id: str | None = None) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM telemetry_daily"
+    sql = f"SELECT * FROM telemetry_daily WHERE {VISIBLE_EDGES}"
     args: list[Any] = []
     if edge_id:
-        sql += " WHERE edge_id=%s"
+        sql += " AND edge_id=%s"
         args.append(edge_id)
     sql += " ORDER BY day DESC, device_id, metric LIMIT %s"
     args.append(limit)
@@ -353,7 +365,7 @@ def daily_rows(limit: int = 200, edge_id: str | None = None) -> list[dict[str, A
 
 def advice(edge_id: str | None = None, risk: str | None = None,
            limit: int = 50) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM advice WHERE TRUE"
+    sql = f"SELECT * FROM advice WHERE {VISIBLE_EDGES}"
     args: list[Any] = []
     if edge_id:
         sql += " AND edge_id=%s"; args.append(edge_id)
@@ -395,7 +407,7 @@ def alert_feed(days: int = 30, stale_ms: int = 2 * 3600_000,
     since = (dt.date.today() - dt.timedelta(days=max(1, days))).isoformat()
     with connect() as conn:
         rows = [_row(r) for r in conn.execute(
-            """SELECT * FROM telemetry_daily WHERE day>=%s
+            f"""SELECT * FROM telemetry_daily WHERE day>=%s AND {VISIBLE_EDGES}
                ORDER BY device_id, metric, day""", (since,))]
 
     runs: list[dict[str, Any]] = []
@@ -510,7 +522,8 @@ def clear_alert_mute(key: str) -> None:
 
 
 def wordcloud(scope: str | None, days: int, today: str) -> list[dict[str, Any]]:
-    sql = "SELECT word, SUM(count) AS count FROM word_freq WHERE day>=%s"
+    sql = ("SELECT word, SUM(count) AS count FROM word_freq WHERE day>=%s"
+           " AND scope IN (SELECT edge_id FROM edges WHERE group_analysis)")
     args: list[Any] = [_shift(today, -(days - 1))]
     if scope:
         sql += " AND scope=%s"; args.append(scope)

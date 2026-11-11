@@ -7,6 +7,7 @@ import { chartTokens, useTheme } from '../lib/theme'
 
 const meta = ref({ metrics: [] })
 const metric = ref('')
+const scope = ref('edges')
 const data = ref(null)
 const error = ref('')
 const { theme } = useTheme()
@@ -19,7 +20,7 @@ async function loadMeta() {
 
 async function loadCompare() {
   if (!metric.value) return
-  data.value = await api(`/compare?metric=${encodeURIComponent(metric.value)}`)
+  data.value = await api(`/compare?metric=${encodeURIComponent(metric.value)}&scope=${scope.value}`)
 }
 
 onMounted(async () => {
@@ -30,10 +31,12 @@ onMounted(async () => {
     error.value = e.message
   }
 })
-watch(metric, loadCompare)
+watch([metric, scope], loadCompare)
+
+const series = computed(() => data.value?.edges || data.value?.devices || [])
 
 const option = computed(() => {
-  const edges = data.value?.edges || []
+  const edges = series.value
   return {
     color: tk.value.palette,
     grid: { left: 8, right: 12, top: 30, bottom: 8, containLabel: true },
@@ -73,8 +76,7 @@ const option = computed(() => {
 })
 
 const rows = computed(() => {
-  const edges = data.value?.edges || []
-  return edges.map((e) => {
+  return series.value.map((e) => {
     const last = e.points[e.points.length - 1]
     const first = e.points[0]
     return { ...e, last, first }
@@ -83,11 +85,15 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <PageHeader title="对比" sub="同一指标在不同边之间的走势，首日统一为 100，只比变化不比绝对值。">
+  <PageHeader title="对比" :sub="`同一指标在${scope === 'edges' ? '不同边' : '不同设备'}之间的走势，首日统一为 100，只比变化不比绝对值。`">
     <select v-model="metric" class="md-field" aria-label="指标">
       <option v-for="m in meta.metrics" :key="m.key" :value="m.key">
         {{ m.label }}（{{ m.unit }}）
       </option>
+    </select>
+    <select v-model="scope" class="md-field" aria-label="对比范围">
+      <option value="edges">按边</option>
+      <option value="devices">按设备</option>
     </select>
   </PageHeader>
 
@@ -95,7 +101,7 @@ const rows = computed(() => {
 
   <section class="md-card">
     <div class="section-head">
-      <h2>跨边走势</h2>
+      <h2>{{ scope === 'edges' ? '跨边走势' : '跨设备走势' }}</h2>
       <span class="md-muted">{{ data?.metric }}，{{ (data?.days || []).length }} 天</span>
     </div>
     <ChartBox :option="option" height="320px" />
@@ -108,10 +114,10 @@ const rows = computed(() => {
     </div>
     <table class="md-table">
       <thead>
-        <tr><th>边</th><th class="num">首日均值</th><th class="num">末日均值</th><th class="num">较首日</th><th class="num">最小 k</th></tr>
+        <tr><th>{{ scope === 'edges' ? '边' : '设备' }}</th><th class="num">首日均值</th><th class="num">末日均值</th><th class="num">较首日</th><th class="num">最小 k</th></tr>
       </thead>
       <tbody>
-        <tr v-for="r in rows" :key="r.edge_id">
+        <tr v-for="r in rows" :key="r.device_id || r.edge_id">
           <td>{{ r.name }}<div class="md-mono md-muted">{{ r.edge_id }}</div></td>
           <td class="num">{{ fmtNum(r.first?.value, 2) }}</td>
           <td class="num">{{ fmtNum(r.last?.value, 2) }}</td>

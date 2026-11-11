@@ -73,11 +73,12 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
     </div>
     <table class="md-table">
       <thead>
-        <tr><th>边</th><th class="num">在线设备</th><th class="num">有数据天数</th><th class="num">最小 k</th><th class="num">指标数</th></tr>
+        <tr><th>边</th><th>群体分析</th><th class="num">在线设备</th><th class="num">有数据天数</th><th class="num">最小 k</th><th class="num">指标数</th></tr>
       </thead>
       <tbody>
         <tr v-for="e in edges" :key="e.edge_id" class="row-click" :class="{ 'row--active': activeEdge === e.edge_id }"
             tabindex="0" @click="activeEdge = e.edge_id" @keydown.enter="activeEdge = e.edge_id">
+          <td>{{ e.group_analysis === false ? '仅计数' : '开' }}</td>
           <td class="edge-cell">
             <strong>{{ e.name }}</strong>
             <span class="md-mono md-muted">{{ e.edge_id }}</span>
@@ -103,7 +104,7 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
       <tbody>
         <tr v-for="d in shown" :key="d.device_id">
           <td class="md-mono"><RouterLink :to="`/devices/${d.device_id}`">{{ d.device_id }}</RouterLink></td>
-          <td>{{ nameOf(d.edge_id) }}</td>
+          <td>{{ nameOf(d.edge_id) }}<span v-if="d.group_analysis === false" class="md-muted">（仅计数）</span></td>
           <td>{{ d.scene || '—' }}</td>
           <td>
             <span class="sev" :class="d.online ? 'sev--ok' : ''">

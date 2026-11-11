@@ -1,0 +1,13 @@
+# AMD 覆盖：docker compose -f compose.yml -f compose.amd.yml --profile ai up -d
+# 需要宿主机装好 ROCm 驱动；Ollama 镜像自带 ROCm 运行时。
+# 不被 ROCm 官方支持的卡可以设 HSA_OVERRIDE_GFX_VERSION（例如 10.3.0）。
+services:
+  ollama:
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: ${HSA_OVERRIDE_GFX_VERSION:-}

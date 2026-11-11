@@ -61,6 +61,8 @@ class ReportPrivacy(Strict):
     subjects_total: int = 0
     # 边在关掉个性化时带 false（文档 §8.5）；可选字段，老边不带也能收
     personalization: bool = True
+    # 边在关掉群体分析时带 false：只上报在线/健康计数
+    group_analysis: bool = True
 
 
 class Period(Strict):

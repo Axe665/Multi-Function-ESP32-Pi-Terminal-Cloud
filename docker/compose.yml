@@ -24,6 +24,7 @@ x-cloud: &cloud
     CLOUD_AUTOSEED: "1"
     CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
     CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen3.5:9b}
+    CLOUD_OLLAMA_SHA256: ${CLOUD_OLLAMA_SHA256:-}
     TZ: Asia/Shanghai
 
 services:
