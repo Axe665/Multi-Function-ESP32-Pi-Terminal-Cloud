@@ -6,5 +6,7 @@ psycopg[binary]>=3.2
 redis>=5.0
 rq>=2.0
 jieba>=0.42
+# mDNS 广播的 CA 指纹按 DER 算，缺了它只能退化成 PEM 文件哈希（与边口径不一致）
+cryptography>=42
 
 zeroconf>=0.132
