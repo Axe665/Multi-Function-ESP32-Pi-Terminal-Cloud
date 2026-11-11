@@ -1,0 +1,11 @@
+# NVIDIA 覆盖：docker compose -f compose.yml -f compose.nvidia.yml --profile ai up -d
+# 需要宿主机装好 NVIDIA 驱动与 nvidia-container-toolkit。
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

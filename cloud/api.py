@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 
-from . import ai, auth, config, mdns, models, queue, store
+from . import ai, auth, config, gpu, mdns, models, queue, store
 
 router = APIRouter(prefix="/api/v1")
 
@@ -121,6 +121,8 @@ def overview() -> dict[str, Any]:
     now = store.now_ms()
     es = store.edges()
     ds = store.devices()
+    off_edges = [e["edge_id"] for e in es if not e.get("group_analysis", True)]
+    visible_devices = [d for d in ds if d.get("group_analysis", True)]
     online_edges = [e for e in es if e["last_seen"] and now - e["last_seen"] < 2 * 3600_000]
     online_devices = [d for d in ds if d["online"]]
 
@@ -129,11 +131,11 @@ def overview() -> dict[str, Any]:
     rows = [r for r in store.daily_rows(4000) if r["day"] >= week_ago]
     # 完整率按「设备日」算：一台设备一天有数据才算完整，缺一台也能看见
     device_days = {(r["device_id"], r["day"]) for r in rows}
-    complete = len(device_days) / max(1, len(ds) * 7) * 100
+    complete = len(device_days) / max(1, len(visible_devices) * 7) * 100
     # 每天一张完整率，给总览画 7 点走势；缺口出现在哪天比一个总数有用
     days = [(today - dt.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
     completeness_days = [
-        round(len({r["device_id"] for r in rows if r["day"] == d}) / max(1, len(ds)) * 100)
+        round(len({r["device_id"] for r in rows if r["day"] == d}) / max(1, len(visible_devices)) * 100)
         for d in days]
 
     alerts = store.advice(risk="alert", limit=200)
@@ -169,6 +171,7 @@ def overview() -> dict[str, Any]:
         "generated_at": now,
         "edges_total": len(es), "edges_online": len(online_edges),
         "devices_total": len(ds), "devices_online": len(online_devices),
+        "group_analysis_off": off_edges,
         "completeness_7d": round(complete, 1),
         "completeness_days": completeness_days,
         "rows_7d": len(rows),
@@ -291,10 +294,30 @@ def daily(edge: str | None = None, limit: int = Query(default=40, ge=1, le=500))
 
 
 @router.get("/compare", dependencies=admin)
-def compare(metric: str) -> dict[str, Any]:
-    """多边同指标对比：原始值 + 以首日为 100 的归一化指数。"""
-    es = store.edges()
+def compare(metric: str, scope: str = Query(default="edges", pattern="^(edges|devices)$")) -> dict[str, Any]:
+    """同一指标横向对比：多边或多设备，都以首日为 100。"""
     rollup = queue.cache_get("rollup:edges") or {}
+    if scope == "devices":
+        out = []
+        for d in store.devices():
+            if not d.get("group_analysis", True):
+                continue
+            pts = store.series(d["edge_id"], d["device_id"], metric)
+            if not pts:
+                continue
+            base = pts[0]["mean"] or 1
+            out.append({
+                "edge_id": d["edge_id"], "device_id": d["device_id"],
+                "name": d["device_id"],
+                "points": [{"day": p["day"], "value": p["mean"],
+                            "index": round(p["mean"] / base * 100, 1)} for p in pts],
+                "k_min": min(p["k"] for p in pts),
+            })
+        days = sorted({p["day"] for s in out for p in s["points"]})
+        return {"metric": metric, "scope": "devices", "devices": out,
+                "days": days, "rollup": {}}
+
+    es = store.edges()
     out = []
     for e in es:
         pts = store.series(e["edge_id"], None, metric)
@@ -308,7 +331,7 @@ def compare(metric: str) -> dict[str, Any]:
             "k_min": min(p["k"] for p in pts),
         })
     days = sorted({p["day"] for s in out for p in s["points"]})
-    return {"metric": metric, "edges": out, "days": days,
+    return {"metric": metric, "scope": "edges", "edges": out, "days": days,
             "rollup": (rollup.get("edges") or {}) if isinstance(rollup, dict) else {}}
 
 
@@ -402,6 +425,8 @@ def health() -> dict[str, Any]:
         "admin_token": "set" if config.ADMIN_TOKEN else "open",
         "ai_mode": config.AI_MODE,
         "ollama": config.OLLAMA_URL if config.AI_MODE == "local" else None,
+        "gpu": gpu.status(),
+        "model": ai.model_status() if config.AI_MODE == "local" else None,
         "edges": len(store.edges()), "devices": len(store.devices()),
         "ingested_rows": store.counters().get("rows_ingested", 0),
         "auth_required": auth.required(),

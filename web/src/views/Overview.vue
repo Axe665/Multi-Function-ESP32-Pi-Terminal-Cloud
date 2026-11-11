@@ -242,6 +242,11 @@ function drillCover(p) {
     </template>
   </StatusBar>
 
+  <section v-if="o?.group_analysis_off?.length" class="md-panel consent-note">
+    <b>部分边只上报计数</b>
+    <span class="md-muted">{{ o.group_analysis_off.join('、') }} 关掉了群体分析，下面的图不含这些边的分析数据。</span>
+  </section>
+
   <div class="board">
     <section class="md-panel wide">
       <div class="section-head">
@@ -322,6 +327,7 @@ function drillCover(p) {
 </template>
 
 <style scoped>
+.consent-note { display: flex; gap: var(--space-3); align-items: baseline; margin-bottom: var(--space-3); }
 .error { color: var(--md-error); margin-bottom: var(--space-3); }
 
 .board {

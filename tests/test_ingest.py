@@ -64,6 +64,32 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertTrue(r.json()["accepted"])
 
+    def test_group_analysis_flag_gates_data(self):
+        payload = example()
+        payload["edge_id"] = "edge-consent-test"
+        payload["report_id"] = "consent-off-0002"
+        payload["privacy"]["group_analysis"] = False
+        for d in payload["devices"]:
+            d["device_id"] = "dev-consent"
+        for row in payload["telemetry_daily"]:
+            row["device_id"] = "dev-consent"
+            row["metric"] = "consent_metric"
+        for a in payload["advice"]:
+            a["device_id"] = "dev-consent"
+        r = self.client.post("/api/v1/ingest/edge-report", json=payload)
+        self.assertEqual(r.status_code, 200, r.text)
+
+        self.assertEqual(store.series("edge-consent-test", None, "consent_metric"), [])
+        self.assertEqual(store.daily_rows(10, "edge-consent-test"), [])
+        self.assertEqual(store.advice("edge-consent-test"), [])
+        edge = next(e for e in store.edges() if e["edge_id"] == "edge-consent-test")
+        self.assertFalse(edge["group_analysis"])
+
+        payload["report_id"] = "consent-on-0001"
+        payload["privacy"]["group_analysis"] = True
+        self.client.post("/api/v1/ingest/edge-report", json=payload)
+        self.assertGreater(len(store.series("edge-consent-test", None, "consent_metric")), 0)
+
     def test_low_k_rejected(self):
         payload = example()
         payload["report_id"] = "lowk-test-0001"
@@ -78,6 +104,30 @@ class IngestTest(unittest.TestCase):
         rows = store.daily_rows(500, payload["edge_id"])
         self.assertGreater(len(rows), 0)
         self.assertTrue(all(r["k"] >= 5 for r in rows))
+
+
+class CompareTest(unittest.TestCase):
+    def test_compare_edges_and_devices(self):
+        store.init_db()
+        from cloud import seed
+        seed.generate(3)
+        c = TestClient(app)
+        metric = c.get("/api/v1/meta").json()["metrics"][0]["key"]
+
+        edges = c.get(f"/api/v1/compare?metric={metric}").json()
+        self.assertEqual(edges["scope"], "edges")
+        self.assertGreater(len(edges["edges"]), 0)
+
+        devices = c.get(f"/api/v1/compare?metric={metric}&scope=devices").json()
+        self.assertEqual(devices["scope"], "devices")
+        self.assertGreater(len(devices["devices"]), 0)
+        self.assertTrue(all(d["device_id"] for d in devices["devices"]))
+
+    def test_health_reports_gpu_and_model(self):
+        c = TestClient(app)
+        h = c.get("/api/v1/health").json()
+        self.assertIn("gpu", h)
+        self.assertIn("model", h)
 
 
 class AuditTest(unittest.TestCase):

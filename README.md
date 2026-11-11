@@ -125,6 +125,10 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 
 ### 最近补的
 
+- **群体分析开关真的传到云**：`edge-report.v1` 的 `privacy` 带 `group_analysis`，云按边存进 `edges` 表；关掉的边，日聚合、建议、词频、告警、对比、AI 摘要都不再参与查询，总览只保留在线/健康计数并标出是哪条边关的。
+- **对比页支持多设备**：`GET /compare?metric=&scope=devices`，前端可切「按边 / 按设备」，都按首日归一为 100。
+- **GPU 不锁厂商**：`/health` 同时识别 NVIDIA 与 AMD；`docker/compose.nvidia.yml` / `docker/compose.amd.yml` 两个覆盖文件分别接 CUDA 与 ROCm，AMD 卡不在支持列表时可设 `HSA_OVERRIDE_GFX_VERSION`。
+- **模型自检**：`/health` 的 `model` 会报 Ollama 里的 digest；设 `CLOUD_OLLAMA_SHA256` 就比对，不一致可直接看出来。Ollama 请求补了 `think:false` 与 `num_predict:1000`。
 - **公网边界有自检了**：`scripts/verify_exposure.sh` 拿 cloud-ca 签的边证书连 8443，逐条验证「两条路由通、其余 403、不带客户端证书连不上」，
   顺带反证 443 的内网管理 API 没被一起挡住。改 Caddyfile 之后跑一次就知道有没有多开。
 - **公网两条路由限速**：`ingest` 60 次/分、`health` 120 次/分，按客户端 IP，超了 429。
@@ -213,7 +217,7 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**32 个用例**：摄取边界（含 `privacy.personalization`）、审计口径、AI 契约与缓存、TOTP 与会话、
+**35 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
@@ -224,22 +228,23 @@ python3 -m unittest discover -s tests -t . -v
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱）与 alert_state（人工动作） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板、建议文本按不可信数据处理 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`；建议文本去控制字符、截断并用「」分隔，prompt 明确它是数据不是指令 |
-| §6.4 网站 | 五页、两级下钻 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`（趋势/按日条带/词云/建议）；Vue3 + Vite + ECharts，自写 M3 token |
+| §6.4 网站 | 五页、两级下钻、多边/多设备对比 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`；对比页可切「按边 / 按设备」，都按首日归一为 100；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth/alerts |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
-| §6.8 GPU 降级 | CUDA 不可用切 3B / 规则 | ✅ 模型不可用 → 规则模板，不会留空报告 |
+| §6.8 GPU 降级 | CUDA 不可用切规则模板 | ✅ `/health` 自检 NVIDIA（nvidia-smi/CUDA）与 AMD（rocm-smi/ROCm）；两者都没有时模型不可用 → 规则模板，不会留空报告 |
 
 ## 仍然没做的
 
 | 方案里的东西 | 现状 |
 |---|---|
-| GPU（P104 / CUDA） | 本机没有 NVIDIA 显卡。模型已定 `qwen3.5:9b`（5.6 GB），但没有拉取也没有跑过：CPU 16 核跑 9B 达不到 §6.8 的 p95 ≤30 s，等 GPU 到位再测；本地模型路径目前只用桩服务验了请求与 JSON 契约 |
+| GPU（NVIDIA / AMD） | 本机没有可用的推理卡。模型已定 `qwen3.5:9b`（5.6 GB），但没有拉取也没有跑过：CPU 16 核跑 9B 达不到 §6.8 的 p95 ≤30 s，等卡到位再测。NVIDIA 用 `compose.nvidia.yml`，AMD 用 `compose.amd.yml`（ROCm）；本地模型路径目前只用桩服务验了请求与 JSON 契约 |
 | 备份落外接 USB 盘 | 路径可配（`CLOUD_BACKUP_HOST_DIR`）；已用独立目录模拟外接盘跑通备份与恢复演练，插真盘只改环境变量 |
 | 每周副本的异地存放 | 加密副本已做（gpg AES256），但"拷到另一块盘"属于运维动作，代码只负责生成 |
 | 多租户 | 明确不做（方案里也不在范围） |
 | 本地模型未跑 | 已定 `qwen3.5:9b`，镜像与模型都没拉；p95 与输出质量等 GPU |
 | 性能基线 | 本机 `/overview` p95 200 ms、`pg_dump` 0.3 s；目标机 72 h 未测 |
+| Postgres 卷静态加密 | 需要宿主机 LUKS（或加密块设备）；代码只保证备份用 gpg AES256。部署时把 `pgdata` 落到已加密的挂载点 |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。
 
