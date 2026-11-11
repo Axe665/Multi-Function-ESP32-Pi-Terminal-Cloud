@@ -71,6 +71,10 @@ cd web && npm install && npm run dev     # http://127.0.0.1:5173，/api 代理�
 ```bash
 cd docker && docker compose up -d --build
 docker compose ps              # api / worker / postgres / redis 全部 healthy
+
+# 要跑本地模型时按卡型加一个覆盖文件（默认不起 ollama）
+docker compose -f compose.yml -f compose.nvidia.yml --profile ai up -d   # NVIDIA/CUDA
+docker compose -f compose.yml -f compose.amd.yml    --profile ai up -d   # AMD/ROCm
 ```
 
 单测用 `pip install -r requirements-dev.txt` 后直接 `python3 -m unittest discover -s tests -t .`：
