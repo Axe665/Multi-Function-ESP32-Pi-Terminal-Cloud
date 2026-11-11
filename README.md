@@ -88,6 +88,17 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 # 两个都要设：只配口令不配 TOTP 会拒绝登录（文档 §6.5）
 ```
 
+## 静态加密（可选，生产建议）
+
+```bash
+# 本机演示：loop 文件；生产换 --device /dev/sdX
+sudo scripts/setup_encrypted_volume.sh --file /var/lib/mt-cloud.img --size 20G
+# 按输出在 docker/.env 里加 CLOUD_PGDATA=/srv/modular-terminal-cloud
+cd docker && docker compose up -d postgres
+```
+
+脚本只做 LUKS + ext4 + mount，不会搬现有 `pgdata`；先 `pg_dump` 再导入。备份仍然是 gpg AES256，和卷加密是两回事。
+
 ## 数据流
 
 ```
@@ -226,6 +237,18 @@ python3 -m unittest discover -s tests -t . -v
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
+## 基准脚本
+
+`scripts/bench/` 是 §11.3 的采样脚本，**本机没有推理卡，全部未执行**：
+
+```bash
+./scripts/bench/bench_9b.sh fleet 5     # 9B 报告 p50/p95 → docs/bench/9b-*.json
+DURATION_H=72 ./scripts/bench/bench_72h.sh   # 72 h 健康与内存 → docs/bench/72h-*.csv
+./scripts/bench/bench_amd.sh            # ROCm 自检 + 一条最小报告
+```
+
+判定标准与结果模板见 [`scripts/bench/README.md`](scripts/bench/README.md)。
+
 ## 与架构文档 v2.3 的逐条对照
 
 | 文档条目 | 要求 | 现状 |
@@ -249,7 +272,7 @@ python3 -m unittest discover -s tests -t . -v
 | 多租户 | 明确不做（方案里也不在范围） |
 | 本地模型未跑 | 已定 `qwen3.5:9b`，镜像与模型都没拉；p95 与输出质量等 GPU |
 | 性能基线 | 本机 `/overview` p95 200 ms、`pg_dump` 0.3 s；目标机 72 h 未测 |
-| Postgres 卷静态加密 | 需要宿主机 LUKS（或加密块设备）；代码只保证备份用 gpg AES256。部署时把 `pgdata` 落到已加密的挂载点 |
+| Postgres 卷静态加密 | `scripts/setup_encrypted_volume.sh` 支持 loop 文件或真实块设备；默认仍是命名卷，生产要按脚本挂 LUKS 并把 `CLOUD_PGDATA` 指过去（本机只做了 `--dry-run`，没真格式化盘） |
 | 模型 SHA256 清单 | `/health` 会报 Ollama 的 `digest`，配 `CLOUD_OLLAMA_SHA256` 才比对；没有随包清单文件 |
 | AI 报告生成状态 | 生成是同步的；报告列表显示模型与 token，没有单独的排队/失败状态字段 |
 
