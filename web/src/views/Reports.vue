@@ -145,7 +145,9 @@ const budget = computed(() => health.value?.api_budget ?? 0)
         >
           <span class="rep-title">{{ taskLabel[r.task] || '趋势解读' }}，{{ scopeLabel[r.scope] || r.scope }}{{ r.scope_id ? '，' + r.scope_id : '' }}</span>
           <span class="rep-meta">
-            {{ fmtDay(r.period_start) }} – {{ fmtDay(r.period_end) }}，{{ r.model }}，{{ fmtTime(r.created_at) }} 生成
+            {{ fmtDay(r.period_start) }} – {{ fmtDay(r.period_end) }}，{{ r.model }}，
+            {{ r.status === 'fallback' ? '规则兜底' : '模型生成' }}，
+            {{ r.tokens_in || 0 }}+{{ r.tokens_out || 0 }} tok，{{ fmtTime(r.created_at) }} 生成
           </span>
         </button>
         <p v-if="!list.length" class="md-muted">还没有报告。</p>
@@ -182,7 +184,8 @@ const budget = computed(() => health.value?.api_budget ?? 0)
           <li v-for="(a, i) in detail.content.actions || []" :key="i">{{ a }}</li>
         </ul>
         <p class="md-muted small foot">
-          prompt {{ detail.prompt_hash }}，{{ detail.model }}，{{ fmtDay(detail.period_start) }}
+          prompt {{ detail.prompt_hash }}，{{ detail.model }}，{{ detail.status === 'fallback' ? '规则兜底' : '模型生成' }}，
+          {{ detail.tokens_in || 0 }}+{{ detail.tokens_out || 0 }} tok，{{ fmtDay(detail.period_start) }}
         </p>
       </template>
       <p v-else class="md-muted">选择一份报告查看详情。</p>

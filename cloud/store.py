@@ -81,8 +81,13 @@ CREATE TABLE IF NOT EXISTS ai_reports (
   content      TEXT,
   tokens_in    INTEGER DEFAULT 0,
   tokens_out   INTEGER DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'ok',   -- ok=模型生成 / fallback=规则兜底（文档 §6.4）
   created_at   TIMESTAMPTZ NOT NULL
 );
+-- 老库补列：报告生成状态（文档 §6.4）
+ALTER TABLE ai_reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ok';
+-- 规则模板生成的旧记录状态补成 fallback
+UPDATE ai_reports SET status='fallback' WHERE model='rules-v1' AND status='ok';
 
 CREATE TABLE IF NOT EXISTS word_freq (
   day   DATE,
@@ -548,7 +553,7 @@ def reports(limit: int = 30) -> list[dict[str, Any]]:
                    SELECT DISTINCT ON (scope, COALESCE(scope_id,''), period_start, period_end,
                                        COALESCE(content::jsonb->>'task','weekly_narrative'))
                           id, scope, scope_id, period_start, period_end, model, prompt_hash,
-                          tokens_in, tokens_out, created_at,
+                          tokens_in, tokens_out, status, created_at,
                           COALESCE(content::jsonb->>'task','weekly_narrative') AS task
                    FROM ai_reports
                    ORDER BY scope, COALESCE(scope_id,''), period_start, period_end,
@@ -573,7 +578,7 @@ def find_report(scope: str, scope_id: str | None, period_end: str,
                 prompt_hash: str, since_ms: int) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(
-            """SELECT id, model FROM ai_reports
+            """SELECT id, model, status FROM ai_reports
                WHERE scope=%s AND COALESCE(scope_id,'')=COALESCE(%s,'')
                  AND period_end=%s AND prompt_hash=%s AND created_at>=%s
                ORDER BY id DESC LIMIT 1""",
@@ -583,14 +588,15 @@ def find_report(scope: str, scope_id: str | None, period_end: str,
 
 def save_report(scope: str, scope_id: str | None, period_start: str, period_end: str,
                 model: str, prompt_hash: str, content: dict[str, Any],
-                tokens_in: int, tokens_out: int) -> int:
+                tokens_in: int, tokens_out: int, status: str = "ok") -> int:
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO ai_reports(scope, scope_id, period_start, period_end, model,
-               prompt_hash, content, tokens_in, tokens_out, created_at)
-               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+               prompt_hash, content, tokens_in, tokens_out, status, created_at)
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (scope, scope_id, period_start, period_end, model, prompt_hash,
-             json.dumps(content, ensure_ascii=False), tokens_in, tokens_out, _ms(now_ms())))
+             json.dumps(content, ensure_ascii=False), tokens_in, tokens_out, status,
+             _ms(now_ms())))
         return int(cur.fetchone()["id"])
 
 

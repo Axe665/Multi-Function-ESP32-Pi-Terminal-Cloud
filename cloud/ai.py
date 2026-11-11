@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import time
 from typing import Any
 
 import httpx
@@ -378,14 +379,42 @@ def _ollama(summary: dict[str, Any]) -> dict[str, Any] | None:
 _model_cache: dict[str, Any] = {"at": 0.0, "value": None}
 
 
-def model_status() -> dict[str, Any]:
-    """文档 §6.8：模型文件带 SHA256 清单。配了 CLOUD_OLLAMA_SHA256 就比对 digest。"""
-    import time
+def _read_manifest() -> dict[str, Any]:
+    try:
+        return json.loads(config.MODEL_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
+
+def _record_manifest(digest: str) -> None:
+    """首次看到模型时把 digest 记进清单（文档 §6.8：模型文件记录 SHA256）。"""
+    data = {"model": config.OLLAMA_MODEL, "digest": digest,
+            "recorded_at": int(time.time() * 1000)}
+    try:
+        config.MODEL_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+        tmp = config.MODEL_MANIFEST.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(config.MODEL_MANIFEST)
+    except OSError:  # 只读部署也能跑，下次健康检查再试
+        pass
+
+
+def model_status() -> dict[str, Any]:
+    """文档 §6.8：模型文件记录 SHA256。
+
+    期望值优先取 CLOUD_OLLAMA_SHA256；没配就读 data/model_manifest.json，
+    首次看到模型时自动写入。模型换了而清单没更新就会 match=false。
+    """
     if _model_cache["value"] and time.time() - _model_cache["at"] < 60:
         return _model_cache["value"]
     out: dict[str, Any] = {"name": config.OLLAMA_MODEL, "expected": config.OLLAMA_SHA256 or None,
+                           "expected_source": "env" if config.OLLAMA_SHA256 else None,
                            "digest": None, "match": None, "reachable": False}
+    manifest = _read_manifest()
+    if not out["expected"] and manifest.get("model") == config.OLLAMA_MODEL \
+            and manifest.get("digest"):
+        out["expected"] = manifest["digest"]
+        out["expected_source"] = "manifest"
     try:
         with httpx.Client(timeout=1.5, trust_env=False) as c:
             r = c.get(f"{config.OLLAMA_URL}/api/tags")
@@ -400,6 +429,11 @@ def model_status() -> dict[str, Any]:
                  or m.get("model") == config.OLLAMA_MODEL), None)
     if item:
         out["digest"] = item.get("digest")
+    if out["digest"] and (manifest.get("model") != config.OLLAMA_MODEL
+                          or not manifest.get("digest")):
+        _record_manifest(out["digest"])
+        out["expected"] = out["digest"]
+        out["expected_source"] = "manifest"
     if out["expected"]:
         out["match"] = out["digest"] == out["expected"]
     _model_cache.update(at=time.time(), value=out)
@@ -420,6 +454,7 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
                                 store.now_ms() - 24 * 3600_000)
         if hit:
             return {"id": hit["id"], "model": hit["model"], "cached": True,
+                    "status": hit.get("status", "ok"),
                     "content": (store.report(hit["id"]) or {}).get("content", {})}
     model = "rules-v1"
     content: dict[str, Any] | None = None
@@ -443,10 +478,13 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
 
     tokens_in = len(PROMPT) // 2 if model != "rules-v1" else 0
     tokens_out = len(json.dumps(content, ensure_ascii=False)) // 2 if model != "rules-v1" else 0
+    # 文档 §6.4：生成状态 = 模型生成 / 规则兜底
+    status = "fallback" if model == "rules-v1" else "ok"
     rid = store.save_report(
         scope, scope_id, summary["from"], summary["to"], model,
         ph, validated.model_dump(by_alias=True),
-        tokens_in, tokens_out)
+        tokens_in, tokens_out, status)
     store.audit("admin", "ai.report.generate", f"report:{rid}",
                 {"scope": scope, "scope_id": scope_id, "model": model, "task": task})
-    return {"id": rid, "model": model, "content": validated.model_dump(by_alias=True)}
+    return {"id": rid, "model": model, "status": status,
+            "content": validated.model_dump(by_alias=True)}

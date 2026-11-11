@@ -62,6 +62,16 @@ class AiReportTest(unittest.TestCase):
         self.assertTrue(out["content"]["narrative"])
         self.assertEqual(out["content"]["confidence"], "low")
 
+    def test_report_records_generation_status(self):
+        # 文档 §6.4：报告列表要能显示生成状态
+        out = ai.generate("fleet", None, force_rules=True,
+                          period=("2026-02-01", "2026-02-02"))
+        self.assertEqual(out["status"], "fallback")
+        self.assertEqual(store.report(out["id"])["status"], "fallback")
+        self.assertEqual(ai.generate("fleet", None, force_rules=True,
+                                     period=("2026-02-01", "2026-02-02"))["status"],
+                         "fallback")
+
 
 if __name__ == "__main__":
     unittest.main()

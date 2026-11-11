@@ -33,6 +33,16 @@ REPORT = {
 
 class _Handler(BaseHTTPRequestHandler):
     calls = 0
+    digest = "sha256:" + "a" * 64
+
+    def do_GET(self):  # noqa: N802 — Ollama /api/tags
+        raw = json.dumps({"models": [{"name": "stub-7b", "model": "stub-7b",
+                                      "digest": type(self).digest}]}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def do_POST(self):  # noqa: N802
         type(self).calls += 1
@@ -72,7 +82,27 @@ class OllamaTest(unittest.TestCase):
         self.assertGreaterEqual(_Handler.calls, 1)
 
     def test_unreachable_falls_back_to_rules(self):
+        old = config.OLLAMA_URL
         config.OLLAMA_URL = "http://127.0.0.1:1"
-        out = ai.generate("device", "no-such-device", task="advice_digest")
+        try:
+            out = ai.generate("device", "no-such-device", task="advice_digest")
+        finally:
+            config.OLLAMA_URL = old
         self.assertEqual(out["model"], "rules-v1")
         self.assertTrue(out["content"]["narrative"])
+
+    def test_model_digest_recorded_in_manifest(self):
+        """文档 §6.8：首次看到模型就把 SHA256 记进清单，之后靠它比对。"""
+        path = config.MODEL_MANIFEST
+        path.unlink(missing_ok=True)
+        ai._model_cache.update(at=0.0, value=None)
+        first = ai.model_status()
+        self.assertTrue(first["reachable"], first)
+        self.assertEqual(first["digest"], _Handler.digest)
+        self.assertEqual(first["expected_source"], "manifest")
+        self.assertTrue(path.exists())
+        ai._model_cache.update(at=0.0, value=None)
+        second = ai.model_status()
+        self.assertTrue(second["match"])
+        path.unlink(missing_ok=True)
+        ai._model_cache.update(at=0.0, value=None)
