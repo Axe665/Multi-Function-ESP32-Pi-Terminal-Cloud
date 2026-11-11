@@ -116,9 +116,11 @@ def login(password: str, code: str) -> dict[str, Any]:
 
     if not check_password(password):
         return fail("bad_password", "口令不正确")
-    if config.ADMIN_TOTP:
-        if not verify_totp(config.ADMIN_TOTP, code):
-            return fail("bad_totp", "动态码不正确或已过期")
+    if not config.ADMIN_TOTP:
+        # 文档 §6.5：管理员账号 + TOTP；只配口令等于少一道因子
+        return fail("totp_missing", "管理员未配置 TOTP，已拒绝仅口令登录")
+    if not verify_totp(config.ADMIN_TOTP, code):
+        return fail("bad_totp", "动态码不正确或已过期")
     _fails.clear()
     store.audit("admin", "auth.login", "admin", {"result": "ok"})
     return {"ok": True, "token": issue_session()}

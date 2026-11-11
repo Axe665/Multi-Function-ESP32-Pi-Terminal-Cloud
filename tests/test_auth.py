@@ -87,6 +87,18 @@ class GuardTest(unittest.TestCase):
         r = self.client.post("/api/v1/auth/login", json={"password": "x", "code": "000000"})
         self.assertEqual(r.status_code, 401)
 
+    def test_password_only_is_rejected(self):
+        """文档 §6.5：管理员账号 + TOTP；只配口令时拒绝登录。"""
+        auth.reset_lockout()
+        config.ADMIN_TOTP = ""
+        try:
+            r = self.client.post("/api/v1/auth/login",
+                                 json={"password": "correct horse", "code": ""})
+        finally:
+            auth.reset_lockout()
+        self.assertEqual(r.status_code, 401)
+        self.assertIn("TOTP", r.json()["detail"])
+
     def test_lockout_after_repeated_failures(self):
         auth.reset_lockout()
         for _ in range(auth.FAIL_MAX):
