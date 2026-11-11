@@ -8,6 +8,8 @@ x-cloud: &cloud
   # 读 cloud-ca 指纹用（mDNS TXT），只读挂载
   volumes:
     - ./certs:/certs:ro
+    # 模型 SHA256 清单与运行数据（文档 §6.8）
+    - ${CLOUD_DATA_HOST_DIR:-../data}:/app/data
   environment: &cloud-env
     CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
     CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}

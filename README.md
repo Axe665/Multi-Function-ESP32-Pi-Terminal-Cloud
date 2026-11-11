@@ -47,7 +47,7 @@
 | 总览 | 现在有没有事，先处理哪一条？ | 首屏 6 块图：全网拓扑（带边名、设备悬停、可缩放）、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5；右栏待处理（确认/静音）与本周报告摘要 |
 | 边与设备 | 问题出在哪个边、哪台设备？ | 两级下钻：点边筛设备，点设备进详情（趋势/日热力/词云/建议流） |
 | 对比 | 谁跑得不一样？ | 同指标跨边指数（首日 = 100）、末日指数与变化 |
-| AI 报告 | 机器怎么看这一周？ | 报告列表、findings、动作、模型与 token；可按原区间重新生成 |
+| AI 报告 | 机器怎么看这一周？ | 报告列表、生成状态（模型生成/规则兜底）、findings、动作、模型与 token；可按原区间重新生成 |
 | 隐私审计 | 云到底拿到了什么？ | k 值分布、被抑制桶数、原始字段拦截、字段白名单、审计日志 |
 
 ## 快速开始
@@ -144,7 +144,8 @@ cd docker && docker compose up -d postgres
 - **群体分析开关真的传到云**：`edge-report.v1` 的 `privacy` 带 `group_analysis`，云按边存进 `edges` 表；关掉的边，日聚合、建议、词频、告警、对比、AI 摘要都不再参与查询，总览只保留在线/健康计数并标出是哪条边关的。
 - **对比页支持多设备**：`GET /compare?metric=&scope=devices`，前端可切「按边 / 按设备」，都按首日归一为 100。
 - **GPU 不锁厂商**：`/health` 同时识别 NVIDIA 与 AMD；`docker/compose.nvidia.yml` / `docker/compose.amd.yml` 两个覆盖文件分别接 CUDA 与 ROCm，AMD 卡不在支持列表时可设 `HSA_OVERRIDE_GFX_VERSION`。
-- **模型自检**：`/health` 的 `model` 会报 Ollama 里的 digest；设 `CLOUD_OLLAMA_SHA256` 就比对，不一致可直接看出来。Ollama 请求补了 `think:false` 与 `num_predict:1000`。
+- **模型自检与 SHA256 清单**：首次看到模型就把 digest 写进 `data/model_manifest.json`，`/health` 的 `model` 报 `expected` / `digest` / `match`；设 `CLOUD_OLLAMA_SHA256` 时以环境变量为准。模型换了而清单没更新会显示 `match=false`。Ollama 请求补了 `think:false` 与 `num_predict:1000`。
+- **报告生成状态**：`ai_reports.status` 记 `ok`（模型生成）或 `fallback`（规则兜底），列表与详情都显示，token 一并展示。
 - **公网边界有自检了**：`scripts/verify_exposure.sh` 拿 cloud-ca 签的边证书连 8443，逐条验证「两条路由通、其余 403、不带客户端证书连不上」，
   顺带反证 443 的内网管理 API 没被一起挡住。改 Caddyfile 之后跑一次就知道有没有多开。
 - **公网两条路由限速**：`ingest` 60 次/分、`health` 120 次/分，按客户端 IP，超了 429。
@@ -233,8 +234,8 @@ cd docker && docker compose up -d postgres
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**40 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
-公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、显式 period、建议文本按不可信数据加分隔、
+**42 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
+公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、模型 digest 写入清单并复用、报告生成状态、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
 ## 基准脚本
@@ -256,11 +257,11 @@ DURATION_H=72 ./scripts/bench/bench_72h.sh   # 72 h 健康与内存 → docs/ben
 | §6.1 部署 | Caddy + Postgres + Redis + RQ + Ollama、mDNS、资源限额 | ✅ 七个服务；PG 16、Redis 7 + RQ、worker 跑三类任务；内存限额 PG 2G/Redis 1G/API 1G/worker 1G/Ollama 8G；云广播 `_orpi-cloud._tcp`，`/ollama/*` 仅内网 |
 | §6.2 数据模型 | edges/devices/telemetry_daily/advice/ai_reports/word_freq/audit | ✅ 七张表齐全，另加 reports（幂等收件箱）与 alert_state（人工动作） |
 | §6.3 AI 分析 | 模式 A/B、四种任务、强制 JSON、失败重试 2 次后落模板、建议文本按不可信数据处理 | ✅ 四种任务都有规则实现；首次 + 重试 2 次仍不过契约就退回 `rules-v1`；建议文本去控制字符、截断并用「」分隔，prompt 明确它是数据不是指令 |
-| §6.4 网站 | 五页、两级下钻、多边/多设备对比 | ✅ 五页齐全；边与设备支持 `边 → 设备详情`；对比页可切「按边 / 按设备」，都按首日归一为 100；Vue3 + Vite + ECharts，自写 M3 token |
+| §6.4 网站 | 五页、两级下钻、多边/多设备对比 | ✅ 五页齐全；报告列表带生成状态与 token；边与设备支持 `边 → 设备详情`；对比页可切「按边 / 按设备」，都按首日归一为 100；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth/alerts |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
 | §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
-| §6.8 GPU 降级 | CUDA 不可用切规则模板 | ✅ `/health` 自检 NVIDIA（nvidia-smi/CUDA）与 AMD（rocm-smi/ROCm）；两者都没有时模型不可用 → 规则模板，不会留空报告 |
+| §6.8 GPU 降级 | CUDA 不可用切规则模板 | ✅ `/health` 自检 NVIDIA（nvidia-smi/CUDA）与 AMD（rocm-smi/ROCm）；模型 digest 首次出现时记进 `data/model_manifest.json` 并用于比对；两者都没有时模型不可用 → 规则模板，不会留空报告 |
 
 ## 仍然没做的
 
@@ -273,8 +274,6 @@ DURATION_H=72 ./scripts/bench/bench_72h.sh   # 72 h 健康与内存 → docs/ben
 | 本地模型未跑 | 已定 `qwen3.5:9b`，镜像与模型都没拉；p95 与输出质量等 GPU |
 | 性能基线 | 本机 `/overview` p95 200 ms、`pg_dump` 0.3 s；目标机 72 h 未测 |
 | Postgres 卷静态加密 | `scripts/setup_encrypted_volume.sh` 支持 loop 文件或真实块设备；默认仍是命名卷，生产要按脚本挂 LUKS 并把 `CLOUD_PGDATA` 指过去（本机只做了 `--dry-run`，没真格式化盘） |
-| 模型 SHA256 清单 | `/health` 会报 Ollama 的 `digest`，配 `CLOUD_OLLAMA_SHA256` 才比对；没有随包清单文件 |
-| AI 报告生成状态 | 生成是同步的；报告列表显示模型与 token，没有单独的排队/失败状态字段 |
 
 演示数据由 `cloud/seed.py` 生成，**不是真实上报**；接真机前清掉 `data/`。
 
