@@ -5,6 +5,8 @@ name: modular-terminal-cloud
 x-cloud: &cloud
   image: modular-terminal-cloud:2.0.0
   restart: unless-stopped
+  # 宿主 data/backups 目录归当前用户，容器跟着用同一个 uid/gid 才写得进去
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
   # 读 cloud-ca 指纹用（mDNS TXT），只读挂载
   volumes:
     - ./certs:/certs:ro
@@ -102,8 +104,6 @@ services:
     # 镜像里的 HEALTHCHECK 是给 api 的，worker 不监听端口
     healthcheck:
       disable: true
-    # 备份目录是宿主目录，用当前用户跑，免得 uid 10001 写不进去
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
       - ${CLOUD_BACKUP_HOST_DIR:-../backups}:/backups
     deploy:

@@ -56,6 +56,17 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(r.json()["detail"]["code"], "RAW_PAYLOAD_REJECTED")
         self.assertGreaterEqual(store.counters().get("raw_rejected", 0), 1)
 
+    def test_min_max_rejected(self):
+        # 文档 §8.2：出端前必须去掉 min/max
+        payload = example()
+        payload["report_id"] = "raw-test-0002"
+        payload["telemetry_daily"][0]["min"] = 1.0
+        payload["telemetry_daily"][0]["max"] = 9.0
+        r = self.client.post("/api/v1/ingest/edge-report", json=payload)
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.json()["detail"]["code"], "RAW_PAYLOAD_REJECTED")
+        self.assertTrue(any(f.endswith(".min") for f in r.json()["detail"]["fields"]))
+
     def test_personalization_flag_accepted(self):
         payload = example()
         payload["report_id"] = "consent-off-0001"

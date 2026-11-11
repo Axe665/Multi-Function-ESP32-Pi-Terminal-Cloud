@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RISK = Literal["info", "watch", "alert"]
 RAW_KEYS = {"user_id", "userId", "user_name", "userName", "subject",
+            "min", "max",   # 文档 §8.2：出端前去掉 min/max
             "values", "raw", "raw_samples", "samples", "records"}
 
 

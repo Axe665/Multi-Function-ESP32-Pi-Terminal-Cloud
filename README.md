@@ -144,7 +144,7 @@ cd docker && docker compose up -d postgres
 - **群体分析开关真的传到云**：`edge-report.v1` 的 `privacy` 带 `group_analysis`，云按边存进 `edges` 表；关掉的边，日聚合、建议、词频、告警、对比、AI 摘要都不再参与查询，总览只保留在线/健康计数并标出是哪条边关的。
 - **对比页支持多设备**：`GET /compare?metric=&scope=devices`，前端可切「按边 / 按设备」，都按首日归一为 100。
 - **GPU 不锁厂商**：`/health` 同时识别 NVIDIA 与 AMD；`docker/compose.nvidia.yml` / `docker/compose.amd.yml` 两个覆盖文件分别接 CUDA 与 ROCm，AMD 卡不在支持列表时可设 `HSA_OVERRIDE_GFX_VERSION`。
-- **模型自检与 SHA256 清单**：首次看到模型就把 digest 写进 `data/model_manifest.json`，`/health` 的 `model` 报 `expected` / `digest` / `match`；设 `CLOUD_OLLAMA_SHA256` 时以环境变量为准。模型换了而清单没更新会显示 `match=false`。Ollama 请求补了 `think:false` 与 `num_predict:1000`。
+- **模型自检与 SHA256 清单**：首次看到模型就把 digest 写进 `data/model_manifest.json`，`/health` 的 `model` 报 `expected` / `digest` / `match`；设 `CLOUD_OLLAMA_SHA256` 时以环境变量为准。模型换了而清单没更新会显示 `match=false`。compose 把宿主 `data/` 挂到 `/app/data`，容器以 `APP_UID/APP_GID`（默认 1000）运行，清单才写得进去。Ollama 请求补了 `think:false` 与 `num_predict:1000`。
 - **报告生成状态**：`ai_reports.status` 记 `ok`（模型生成）或 `fallback`（规则兜底），列表与详情都显示，token 一并展示。
 - **公网边界有自检了**：`scripts/verify_exposure.sh` 拿 cloud-ca 签的边证书连 8443，逐条验证「两条路由通、其余 403、不带客户端证书连不上」，
   顺带反证 443 的内网管理 API 没被一起挡住。改 Caddyfile 之后跑一次就知道有没有多开。
@@ -234,7 +234,7 @@ cd docker && docker compose up -d postgres
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**42 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
+**43 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`、min/max 拒收）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
 公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、模型 digest 写入清单并复用、报告生成状态、显式 period、建议文本按不可信数据加分隔、
 告警按日聚合的合并与确认/静音/审计。
 
