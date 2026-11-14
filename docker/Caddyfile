@@ -2,6 +2,13 @@
 #   443 —— 管理台与内网 API，cloud-ca 签发的站点证书
 #   8443 —— 只给边上报用，强制客户端证书（文档 §5.8 的 mTLS）
 # 本机明文入口：只绑 127.0.0.1，给本机调试和截图用（公网仍然只有 443/8443）
+# 浏览器和 curl 对 IP 字面量不发 SNI（RFC 6066）；:443 上有多站点时，
+# 没有 SNI 就选不到站点，握手直接 internal error。管理台常按内网 IP 访问，
+# 所以给一个默认 SNI。
+{
+	default_sni {$CLOUD_DOMAIN:localhost}
+}
+
 http://:8088 {
 	# 本地模型的调试入口放这里：8088 只绑 127.0.0.1，443 上不再有免鉴权分支
 	handle /ollama/* {
@@ -15,7 +22,9 @@ http://:8088 {
 	}
 }
 
-{$CLOUD_DOMAIN:localhost} {
+# 域名与内网 IP 都算这个站点的地址。只写域名时，按 IP 访问会在 TLS 握手
+# 阶段就被拒（no certificate available for SNI），管理台上不去。
+{$CLOUD_DOMAIN:localhost} {$CLOUD_LAN_IP} {
 	tls /certs/cloud.crt /certs/cloud.key
 
 	# Ollama 只在 8088（127.0.0.1）上开放，443 明确拒绝，别落到前端兜底里

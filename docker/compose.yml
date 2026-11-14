@@ -46,6 +46,11 @@ services:
     image: caddy:2-alpine
     container_name: mt-cloud-caddy
     restart: unless-stopped
+    environment:
+      # Caddyfile 里按这两个值决定 443 站点认哪些地址；不传的话
+      # {$CLOUD_LAN_IP} 展开成空，按 IP 访问会在 TLS 握手阶段被拒
+      CLOUD_DOMAIN: ${CLOUD_DOMAIN:-localhost}
+      CLOUD_LAN_IP: ${CLOUD_LAN_IP:-}
     ports:
       # 管理台只在内网：绑到 LAN 网卡，避免 0.0.0.0 被端口转发出去
       - "${CLOUD_LAN_IP:-0.0.0.0}:443:443"

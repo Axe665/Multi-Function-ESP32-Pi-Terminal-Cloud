@@ -34,7 +34,7 @@ class CaddyTrustBoundaryTest(unittest.TestCase):
 
     def test_ingest_is_refused_on_the_plain_tls_listener(self):
         """443 没有 client_auth，必须显式拒绝摄取，不能落进 /api/* 的兜底。"""
-        block = _block(self.text, "{$CLOUD_DOMAIN:localhost} {")
+        block = _block(self.text, "{$CLOUD_DOMAIN:localhost} {$CLOUD_LAN_IP} {")
         # 看指令本身，不看注释（注释里也提到这个词）
         self.assertIsNone(re.search(r"^\s*client_auth\s*\{", block, re.M),
                           "443 监听不该要求客户端证书，所以更不能放摄取进来")
@@ -47,7 +47,7 @@ class CaddyTrustBoundaryTest(unittest.TestCase):
 
     def test_plain_listener_clears_the_cn_header(self):
         """兜底：即使以后有人加了信 CN 的接口，443 也不许把这个头传上去。"""
-        block = _block(self.text, "{$CLOUD_DOMAIN:localhost} {")
+        block = _block(self.text, "{$CLOUD_DOMAIN:localhost} {$CLOUD_LAN_IP} {")
         self.assertRegex(block, r'header_up\s+X-Client-CN\s+(""|\'\')')
 
     def test_mtls_listener_sets_the_cn_header(self):
