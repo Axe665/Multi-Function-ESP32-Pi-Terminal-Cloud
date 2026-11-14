@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, fmtNum, fmtTime } from '../api'
 import { chartTokens, useTheme } from '../lib/theme'
+import PageLead from '../components/PageLead.vue'
 import StatusBar from '../components/StatusBar.vue'
 import AlertList from '../components/AlertList.vue'
 import ChartBox from '../components/ChartBox.vue'
@@ -88,7 +89,7 @@ const completeOption = computed(() => {
     series: [{
       type: 'bar', data: days, barWidth: '58%',
       itemStyle: {
-        color: (p) => (p.value < 80 ? '#c98a2a' : t.line),
+        color: (p) => (p.value < 80 ? t.notice : t.line),
         borderRadius: [3, 3, 0, 0],
       },
       label: {
@@ -133,8 +134,7 @@ const coverOption = computed(() => {
   const t = tk.value
   const rows = (devices.value || []).slice(0, 12)
   return {
-    // 40° 斜标签 containLabel 算不全，底部留两行
-    grid: { left: 4, right: 8, top: 16, bottom: 30, containLabel: true },
+    grid: { left: 4, right: 30, top: 8, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (p) => {
@@ -143,17 +143,20 @@ const coverOption = computed(() => {
       },
     },
     xAxis: {
-      type: 'category', data: rows.map((d) => d.device_id),
-      axisLabel: { fontSize: 12, color: t.axis, rotate: 40, interval: 0 },
-      axisLine: { lineStyle: { color: t.split } }, axisTick: { show: false },
+      type: 'value', minInterval: 1,
+      splitLine: { lineStyle: { color: t.split } },
+      axisLabel: { fontSize: 11, color: t.axis },
     },
-    yAxis: { type: 'value', minInterval: 1, interval: 2, splitLine: { lineStyle: { color: t.split } },
-             axisLabel: { fontSize: 12, color: t.axis } },
+    yAxis: {
+      type: 'category', data: rows.map((d) => d.device_id), inverse: true,
+      axisLabel: { fontSize: 11, color: t.text },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
     series: [{
-      type: 'bar', barWidth: '55%',
+      type: 'bar', barWidth: '58%',
       data: rows.map((d) => ({ value: (d.metrics || []).length,
-                               itemStyle: { color: d.online ? t.line : t.axis, borderRadius: [3, 3, 0, 0] } })),
-      label: { show: false },
+                               itemStyle: { color: d.online ? t.line : t.axis, borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 10, color: t.axis },
     }],
   }
 })
@@ -183,7 +186,7 @@ const alertsOption = computed(() => {
     },
     series: [{
       type: 'bar', data: top.map((a) => a.count), barWidth: '55%',
-      itemStyle: { color: '#c98a2a', borderRadius: [0, 3, 3, 0] },
+      itemStyle: { color: t.notice, borderRadius: [0, 4, 4, 0] },
       label: { show: true, position: 'right', fontSize: 12, color: t.axis },
     }],
   }
@@ -235,135 +238,133 @@ function drillCover(p) {
 <template>
   <p v-if="error" class="error">读不到总览：{{ error }}</p>
 
-  <StatusBar :status="status" :title="headline" :sub="sub">
-    <template #actions>
-      <span class="md-chip">{{ o?.ai_mode === 'api' ? '公有 API' : '本地模型' }}</span>
-      <RouterLink class="md-btn" to="/reports">生成 AI 报告</RouterLink>
-    </template>
-  </StatusBar>
+  <PageLead sub="3 个边、9 台设备，只接收 k≥5 的日聚合；点图块进详情。">
+    <span class="md-chip">{{ o?.ai_mode === 'api' ? '公有 API' : '本地模型' }}</span>
+    <RouterLink class="md-btn" to="/reports">生成 AI 报告</RouterLink>
+  </PageLead>
 
-  <section v-if="o?.group_analysis_off?.length" class="md-panel consent-note">
-    <b>部分边只上报计数</b>
-    <span class="md-muted">{{ o.group_analysis_off.join('、') }} 关掉了群体分析，下面的图不含这些边的分析数据。</span>
-  </section>
+  <div class="md-grid dense">
+    <StatusBar :status="status" :title="headline" :sub="sub" />
 
-  <div class="board">
-    <section class="md-panel wide">
-      <div class="section-head">
+    <section v-if="o?.group_analysis_off?.length" class="md-card span-12 consent-note">
+      <b>部分边只上报计数</b>
+      <span class="md-muted">{{ o.group_analysis_off.join('、') }} 关掉了群体分析，下面的图不含这些边的分析数据。</span>
+    </section>
+
+    <section class="md-card span-8 card-top">
+      <div class="md-card-head">
         <h2>全网拓扑</h2>
-        <span class="md-muted">边名常显，设备悬停看名字；滚轮缩放</span>
+        <span class="meta">边名常显，设备悬停看名字；滚轮缩放</span>
       </div>
-      <div class="chart"><Topology :edges="o?.edges || []" :devices="devices" :cloud-name="o?.cloud_name" @pick="pickTopo" /></div>
+      <div class="chart-fill">
+        <Topology :edges="o?.edges || []" :devices="devices" :cloud-name="o?.cloud_name" @pick="pickTopo" />
+      </div>
     </section>
 
-    <aside class="side">
-      <section class="md-panel">
-        <div class="section-head">
-          <h2>待处理</h2>
-          <span class="md-muted">{{ o ? alerts.length : '—' }} 条</span>
-        </div>
-        <AlertList :alerts="alerts" :limit="4" @changed="load" />
-      </section>
+    <section class="md-card span-4 card-top">
+      <div class="md-card-head">
+        <h2>待处理</h2>
+        <span class="meta">{{ o ? alerts.length : '—' }} 条</span>
+      </div>
+      <AlertList :alerts="alerts" :limit="4" @changed="load" />
+    </section>
 
-    <section class="md-section">
-      <div class="section-head">
+    <section class="md-card span-4 card-mid">
+      <div class="md-card-head">
         <h2>边在线率</h2>
-        <span class="md-muted">2 小时内上报</span>
+        <span class="meta">2 小时内上报</span>
       </div>
-      <div class="chart"><ChartBox :option="edgeOption" height="100%" @click="router.push('/edges')" /></div>
+      <div class="chart-fill">
+        <ChartBox :option="edgeOption" height="100%" label="各边在线设备比例" @click="router.push('/edges')" />
+      </div>
     </section>
 
-      <section class="md-section">
-        <div class="section-head">
-          <h2>本周报告摘要</h2>
-          <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
-        </div>
-        <article v-if="latest" class="md-panel brief">
-          <h3>{{ latest.content.headline }}</h3>
-          <p class="md-muted small">{{ latest.period_start }} – {{ latest.period_end }}，{{ latest.model }}</p>
-          <p class="narrative">{{ latest.content.narrative }}</p>
-          <RouterLink class="md-btn md-btn--text" to="/reports">查看报告</RouterLink>
-        </article>
-        <p v-else class="md-muted">还没有报告。</p>
-      </section>
-
-    </aside>
-
-    <section class="md-panel">
-      <div class="section-head">
+    <section class="md-card span-4 card-mid">
+      <div class="md-card-head">
         <h2>近 7 天完整率</h2>
-        <span class="md-muted">合计 {{ fmtNum(o?.completeness_7d, 1) }}%</span>
+        <span class="meta">合计 {{ fmtNum(o?.completeness_7d, 1) }}%</span>
       </div>
-      <div class="chart"><ChartBox :option="completeOption" height="100%" /></div>
+      <div class="chart-fill">
+        <ChartBox :option="completeOption" height="100%" label="近 7 天完整率" />
+      </div>
     </section>
 
-    <section class="md-panel">
-      <div class="section-head">
+    <section class="md-card span-4 card-mid">
+      <div class="md-card-head">
         <h2>各边每日入库</h2>
-        <span class="md-muted">行日聚合</span>
+        <span class="meta">行日聚合</span>
       </div>
-      <div class="chart"><ChartBox :option="rowsOption" height="100%" @click="router.push('/edges')" /></div>
+      <div class="chart-fill">
+        <ChartBox :option="rowsOption" height="100%" label="各边每日入库条数" @click="router.push('/edges')" />
+      </div>
     </section>
 
-    <section class="md-panel">
-      <div class="section-head">
+    <section class="md-card span-4 card-low">
+      <div class="md-card-head">
         <h2>指标覆盖</h2>
-        <span class="md-muted">点柱子进设备详情</span>
+        <span class="meta">点柱子进设备详情</span>
       </div>
-      <div class="chart"><ChartBox :option="coverOption" height="100%" :on-click="drillCover" /></div>
+      <div class="chart-fill">
+        <ChartBox :option="coverOption" height="100%" :on-click="drillCover" label="各设备上报的指标数" />
+      </div>
     </section>
 
-      <section class="md-panel">
-        <div class="section-head">
+    <section class="md-card span-4 card-low">
+      <div class="md-card-head">
         <h2>告警 Top 5</h2>
-        <span class="md-muted">最近 7 天，点条看审计</span>
-        </div>
-      <ChartBox :option="alertsOption" height="145px" @click="router.push('/privacy')" />
+        <span class="meta">最近 7 天，点条看审计</span>
+      </div>
+      <div class="chart-fill">
+        <ChartBox :option="alertsOption" height="100%" label="告警条数前五" @click="router.push('/privacy')" />
+      </div>
     </section>
 
-
-
+    <section class="md-card span-4 card-low">
+      <div class="md-card-head">
+        <h2>本周报告摘要</h2>
+        <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
+      </div>
+      <article v-if="latest" class="brief">
+        <h3>{{ latest.content.headline }}</h3>
+        <p class="md-muted small">{{ latest.period_start }} – {{ latest.period_end }}，{{ latest.model }}</p>
+        <p class="narrative">{{ latest.content.narrative }}</p>
+        <RouterLink class="md-btn md-btn--text" to="/reports">查看报告</RouterLink>
+      </article>
+      <p v-else class="md-muted">还没有报告。</p>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.consent-note { display: flex; gap: var(--space-3); align-items: baseline; margin-bottom: var(--space-3); }
-.error { color: var(--md-error); margin-bottom: var(--space-3); }
-
-.board {
-  flex: 1;
-  min-height: 600px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) clamp(340px, 21vw, 430px);
-  grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: clamp(10px, 0.9vw, 16px);
-  margin-top: clamp(10px, 1vw, 16px);
-  align-items: stretch;
+.error {
+  color: var(--md-error);
+  max-width: var(--content-max);
+  margin: 0 auto var(--space-3);
 }
-.wide { grid-column: span 2; }
-.board > section { display: flex; flex-direction: column; min-height: 0; }
-.board .chart { flex: 1; min-height: 0; }
-.side {
-  grid-column: 3;
-  grid-row: 1 / span 3;
+.dense {
+  gap: var(--space-3);
+}
+.consent-note {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+/* 整屏不滚动：每行固定高度，图表撑满 */
+.card-top, .card-mid, .card-low {
   display: flex;
   flex-direction: column;
-  gap: clamp(10px, 0.9vw, 16px);
   min-width: 0;
+}
+.card-top { height: 260px; }
+.card-mid { height: 184px; }
+.card-low { height: 200px; }
+.chart-fill {
+  flex: 1;
   min-height: 0;
 }
-.side > section { display: flex; flex-direction: column; min-height: 0; }
-.side .brief { overflow: hidden; }
-
-.section-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-  flex-wrap: wrap;
+.chart-fill :deep(div) {
+  height: 100%;
 }
-.section-head h2 { font: var(--md-title-small); }
 
 .brief h3 { font: var(--md-title-medium); margin-bottom: 2px; }
 .narrative {
@@ -371,19 +372,9 @@ function drillCover(p) {
   color: var(--md-on-surface-variant);
   margin: var(--space-2) 0;
   display: -webkit-box;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 7;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .small { font: var(--md-body-small); }
-
-@media (max-width: 1180px) {
-  .board { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .side { grid-column: 1 / -1; grid-row: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 760px) {
-  .board { grid-template-columns: minmax(0, 1fr); }
-  .wide { grid-column: auto; }
-  .side { grid-template-columns: minmax(0, 1fr); }
-}
 </style>

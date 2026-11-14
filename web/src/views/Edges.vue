@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, fmtTime } from '../api'
-import PageHeader from '../components/PageHeader.vue'
+import PageLead from '../components/PageLead.vue'
+import Icon from '../components/Icon.vue'
 import ChartBox from '../components/ChartBox.vue'
 import { chartTokens, useTheme } from '../lib/theme'
 
@@ -49,86 +50,102 @@ const nameOf = (id) => edges.value.find((e) => e.edge_id === id)?.name || id
 </script>
 
 <template>
-  <PageHeader
-    title="边与设备"
-    :sub="`${edges.length} 个边，${devices.length} 台设备。选择边可筛选设备，选择设备查看趋势。`"
-  >
-    <button v-if="activeEdge" class="md-btn md-btn--text" @click="activeEdge = ''">显示全部边</button>
-  </PageHeader>
-
   <p v-if="error" class="error">{{ error }}</p>
 
-  <section class="md-card">
-    <div class="section-head">
-      <h2>边对比</h2>
-      <span class="md-muted">在线设备 / 设备总数，最近 7 天</span>
-    </div>
-    <ChartBox :option="compareOption" height="150px" />
-  </section>
+  <PageLead :sub="`${edges.length} 个边，${devices.length} 台设备。选择边可筛选设备，选择设备查看趋势。`">
+    <button v-if="activeEdge" class="md-btn md-btn--text" @click="activeEdge = ''">显示全部边</button>
+  </PageLead>
 
-  <section class="md-card">
-    <div class="section-head">
-      <h2>边节点</h2>
-      <span class="md-muted">最近 7 天</span>
-    </div>
-    <table class="md-table">
-      <thead>
-        <tr><th>边</th><th>群体分析</th><th class="num">在线设备</th><th class="num">有数据天数</th><th class="num">最小 k</th><th class="num">指标数</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="e in edges" :key="e.edge_id" class="row-click" :class="{ 'row--active': activeEdge === e.edge_id }"
-            tabindex="0" @click="activeEdge = e.edge_id" @keydown.enter="activeEdge = e.edge_id">
-          <td>{{ e.group_analysis === false ? '仅计数' : '开' }}</td>
-          <td class="edge-cell">
-            <strong>{{ e.name }}</strong>
-            <span class="md-mono md-muted">{{ e.edge_id }}</span>
-          </td>
-          <td class="num">{{ e.online_devices }}<span class="md-muted"> / {{ e.devices }}</span></td>
-          <td class="num">{{ e.days }}<span class="md-muted"> / 7</span></td>
-          <td class="num">{{ e.k_min }}</td>
-          <td class="num">{{ e.metrics.length }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+  <div class="md-grid">
+    <section class="md-card span-12">
+      <div class="md-card-head">
+        <h2>边对比</h2>
+        <span class="meta">在线设备 / 设备总数，最近 7 天</span>
+      </div>
+      <ChartBox :option="compareOption" height="150px" label="各边在线设备与设备总数" />
+    </section>
 
-  <section class="md-card devices">
-    <div class="section-head">
-      <h2>设备</h2>
-      <span class="md-muted">{{ activeEdge ? nameOf(activeEdge) + '，' : '' }}{{ shown.length }} 台</span>
-    </div>
-    <table class="md-table">
-      <thead>
-        <tr><th>设备</th><th>所属边</th><th>场景</th><th>状态</th><th class="num">有数据天数</th><th class="num">最小 k</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="d in shown" :key="d.device_id">
-          <td class="md-mono"><RouterLink :to="`/devices/${d.device_id}`">{{ d.device_id }}</RouterLink></td>
-          <td>{{ nameOf(d.edge_id) }}<span v-if="d.group_analysis === false" class="md-muted">（仅计数）</span></td>
-          <td>{{ d.scene || '—' }}</td>
-          <td>
-            <span class="sev" :class="d.online ? 'sev--ok' : ''">
+    <section class="md-card span-12">
+      <div class="md-card-head">
+        <h2>边节点</h2>
+        <span class="meta">最近 7 天，点一行筛选设备</span>
+      </div>
+      <div class="md-list">
+        <button
+          v-for="e in edges"
+          :key="e.edge_id"
+          type="button"
+          class="md-list-item edge-row"
+          :class="{ 'edge-row--active': activeEdge === e.edge_id }"
+          :aria-pressed="activeEdge === e.edge_id"
+          @click="activeEdge = activeEdge === e.edge_id ? '' : e.edge_id"
+        >
+          <span class="md-list-icon"><Icon name="hub" /></span>
+          <div class="md-grow">
+            <div class="md-list-title">{{ e.name }}</div>
+            <div class="md-list-sub md-mono">{{ e.edge_id }}</div>
+          </div>
+          <div class="md-list-trail">
+            <span class="md-chip" :class="e.group_analysis === false ? 'md-chip--idle' : 'md-chip--ok'">
+              {{ e.group_analysis === false ? '仅计数' : '群体分析' }}
+            </span>
+            <span class="stat"><b>{{ e.online_devices }}</b><span>/ {{ e.devices }} 在线</span></span>
+            <span class="stat"><b>{{ e.days }}</b><span>/ 7 天有数据</span></span>
+            <span class="stat"><b>{{ e.k_min }}</b><span>最小 k</span></span>
+            <span class="stat"><b>{{ e.metrics.length }}</b><span>指标</span></span>
+            <Icon name="chevron_right" />
+          </div>
+        </button>
+      </div>
+    </section>
+
+    <section class="md-card span-12">
+      <div class="md-card-head">
+        <h2>设备</h2>
+        <span class="meta">{{ activeEdge ? nameOf(activeEdge) + '，' : '' }}{{ shown.length }} 台</span>
+      </div>
+      <div class="md-list">
+        <RouterLink v-for="d in shown" :key="d.device_id" :to="`/devices/${d.device_id}`" class="md-list-item">
+          <span class="md-list-icon"><Icon name="devices" /></span>
+          <div class="md-grow">
+            <div class="md-list-title md-mono">{{ d.device_id }}</div>
+            <div class="md-list-sub">
+              {{ nameOf(d.edge_id) }}<span v-if="d.group_analysis === false">（仅计数）</span> · {{ d.scene || '—' }}
+            </div>
+          </div>
+          <div class="md-list-trail">
+            <span class="stat"><b>{{ d.days }}</b><span>/ 7 天有数据</span></span>
+            <span class="stat"><b>{{ d.k_min }}</b><span>最小 k</span></span>
+            <span class="sev" :class="d.online ? 'sev--ok' : 'sev--critical'">
               <span class="sev-dot"></span>{{ d.online ? '在线' : '离线' }}
             </span>
-          </td>
-          <td class="num">{{ d.days }}<span class="md-muted"> / 7</span></td>
-          <td class="num">{{ d.k_min }}</td>
-        </tr>
-        <tr v-if="!shown.length"><td colspan="6" class="md-muted">这个边还没有设备上报。</td></tr>
-      </tbody>
-    </table>
-    <p class="md-muted small hint">最近一次上报 {{ fmtTime(Math.max(...devices.map((d) => d.last_seen || 0))) }}。</p>
-  </section>
+            <Icon name="chevron_right" />
+          </div>
+        </RouterLink>
+        <p v-if="!shown.length" class="md-muted">这个边还没有设备上报。</p>
+      </div>
+      <p class="md-muted small hint">最近一次上报 {{ fmtTime(Math.max(...devices.map((d) => d.last_seen || 0))) }}。</p>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.error { color: var(--md-error); margin-bottom: var(--space-3); }
-.section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
-.devices { margin-top: var(--space-4); }
-.edge-cell { white-space: nowrap; }
-.edge-cell .md-mono { margin-left: var(--space-2); }
-.row-click { cursor: pointer; }
-.row--active { background: var(--md-secondary-container); }
+.error { color: var(--md-error); max-width: var(--content-max); margin: 0 auto var(--space-3); }
+.edge-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.edge-row--active {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+.stat { display: flex; align-items: baseline; gap: 4px; color: var(--md-on-surface-variant); font: var(--md-label-medium); }
+.stat b { font: var(--md-title-small); color: var(--md-on-surface); }
 .small { font: var(--md-body-small); }
 .hint { margin-top: var(--space-3); }
 </style>

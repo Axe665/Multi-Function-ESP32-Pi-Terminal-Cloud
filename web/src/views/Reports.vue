@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, fmtDay, fmtNum, fmtTime } from '../api'
-import PageHeader from '../components/PageHeader.vue'
+import PageLead from '../components/PageLead.vue'
 import ChartBox from '../components/ChartBox.vue'
 import { chartTokens, useTheme } from '../lib/theme'
 import { useSnack } from '../components/useSnack'
@@ -116,24 +116,30 @@ const budget = computed(() => health.value?.api_budget ?? 0)
 </script>
 
 <template>
-  <PageHeader title="AI 报告" sub="默认使用本地 Ollama。模型不可用时落规则模板，置信度标为低。">
-    <select v-model="scope" class="md-field" aria-label="报告范围">
-      <option value="fleet">全网</option>
-      <option value="edge">单边</option>
-    </select>
-    <select v-model="task" class="md-field" aria-label="报告类型">
-      <option v-for="(label, key) in taskLabel" :key="key" :value="key">{{ label }}</option>
-    </select>
-    <button class="md-btn" :disabled="busy" @click="generate">生成报告</button>
-  </PageHeader>
-
   <p v-if="error" class="error">{{ error }}</p>
 
-  <div class="split">
-    <section class="md-card">
-      <div class="section-head">
+  <PageLead sub="默认使用本地 Ollama。模型不可用时落规则模板，置信度标为低。">
+    <label class="md-field pick">
+      <span>范围</span>
+      <select v-model="scope">
+        <option value="fleet">全网</option>
+        <option value="edge">单边</option>
+      </select>
+    </label>
+    <label class="md-field pick">
+      <span>类型</span>
+      <select v-model="task">
+        <option v-for="(label, key) in taskLabel" :key="key" :value="key">{{ label }}</option>
+      </select>
+    </label>
+    <button class="md-btn" :disabled="busy" @click="generate">生成报告</button>
+  </PageLead>
+
+  <div class="md-grid">
+    <section class="md-card span-4 reports">
+      <div class="md-card-head">
         <h2>报告列表</h2>
-        <span class="md-muted">{{ list.length }} 份</span>
+        <span class="meta">{{ list.length }} 份</span>
       </div>
       <div class="rep-list">
         <button
@@ -154,22 +160,22 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       </div>
     </section>
 
-    <section class="md-card">
+    <section class="md-card span-8 reports">
       <template v-if="detail">
         <div class="ai-head">
           <span class="md-muted small">
             {{ scopeLabel[detail.scope] || detail.scope }}，{{ detail.model }} {{ fmtDay(detail.content.period.from) }} – {{ fmtDay(detail.content.period.to) }}
           </span>
-          <button class="md-btn md-btn--text" :disabled="busy" @click="regenerate">按原区间重新生成</button>
           <span class="md-chip" :class="detail.content.confidence === 'high' ? 'md-chip--ok' : 'md-chip--warn'">
             {{ detail.content.confidence === 'high' ? '高置信' : '规则模板' }}
           </span>
+          <button class="md-btn md-btn--text" :disabled="busy" @click="regenerate">按原区间重新生成</button>
         </div>
         <h2 class="headline">{{ detail.content.headline }}</h2>
         <p class="narrative">{{ detail.content.narrative }}</p>
 
         <div v-if="detail.content.findings?.length" class="md-list">
-          <div v-for="(f, i) in detail.content.findings" :key="i" class="md-list-row">
+          <div v-for="(f, i) in detail.content.findings" :key="i" class="md-list-item">
             <span class="sev-tag" :class="f.risk === 'alert' ? 'sev-tag--notice' : 'sev-tag--idle'">
               {{ f.risk === 'alert' ? '告警' : '关注' }}
             </span>
@@ -191,37 +197,57 @@ const budget = computed(() => health.value?.api_budget ?? 0)
       <p v-else class="md-muted">选择一份报告查看详情。</p>
     </section>
 
-  </div>
-
-    <div class="split-2">
-    <section class="md-card">
-      <div class="section-head"><h2>任务分布</h2><span class="md-muted">{{ list.length }} 份报告</span></div>
-      <ChartBox :option="taskOption" height="180px" />
+    <section class="md-card span-6">
+      <div class="md-card-head">
+        <h2>任务分布</h2>
+        <span class="meta">{{ list.length }} 份报告</span>
+      </div>
+      <ChartBox :option="taskOption" height="180px" label="报告任务分布" />
     </section>
-    <section class="md-card">
-      <div class="section-head"><h2>成本与缓存</h2><span class="md-muted">公有 API 模式才计费</span></div>
+
+    <section class="md-card span-6">
+      <div class="md-card-head">
+        <h2>成本与缓存</h2>
+        <span class="meta">公有 API 模式才计费</span>
+      </div>
       <div class="md-list">
-        <div class="md-list-row"><div class="md-grow">本月 token<div class="md-muted small">上限 {{ fmtNum(budget, 0) }}</div></div><span class="md-mono">{{ fmtNum(used, 0) }}</span></div>
-        <div class="md-list-row"><div class="md-grow">缓存命中<div class="md-muted small">同输入 24 h 内复用</div></div><span class="md-mono">{{ cacheHits }}</span></div>
-        <div class="md-list-row"><div class="md-grow">单次输入上限<div class="md-muted small">超出后先裁剪指标明细</div></div><span class="md-mono">8k</span></div>
-        <div class="md-list-row"><div class="md-grow">单次输出上限<div class="md-muted small">强约束 JSON</div></div><span class="md-mono">1k</span></div>
+        <div class="md-list-item">
+          <div class="md-grow">本月 token<div class="md-muted small">上限 {{ fmtNum(budget, 0) }}</div></div>
+          <span class="md-mono">{{ fmtNum(used, 0) }}</span>
+        </div>
+        <div class="md-list-item">
+          <div class="md-grow">缓存命中<div class="md-muted small">同输入 24 h 内复用</div></div>
+          <span class="md-mono">{{ cacheHits }}</span>
+        </div>
+        <div class="md-list-item">
+          <div class="md-grow">单次输入上限<div class="md-muted small">超出后先裁剪指标明细</div></div>
+          <span class="md-mono">8k</span>
+        </div>
+        <div class="md-list-item">
+          <div class="md-grow">单次输出上限<div class="md-muted small">强约束 JSON</div></div>
+          <span class="md-mono">1k</span>
+        </div>
       </div>
     </section>
   </div>
-
-
 </template>
 
 <style scoped>
-.error { color: var(--md-error); margin-bottom: var(--space-3); }
-.split { display: grid; gap: var(--space-4); }
-.rep-list { display: flex; gap: var(--space-2); overflow-x: auto; max-height: none; }
-.rep { min-width: 240px; flex: 0 0 auto; }
-.split-2 {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4); margin-top: var(--space-4); align-items: stretch;
+.error { color: var(--md-error); max-width: var(--content-max); margin: 0 auto var(--space-3); }
+.pick { width: 180px; }
+.reports {
+  display: flex;
+  flex-direction: column;
+  height: 560px;
+  min-width: 0;
 }
-.section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
+.rep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
 .rep {
   display: grid;
   gap: 2px;
@@ -233,18 +259,14 @@ const budget = computed(() => health.value?.api_budget ?? 0)
   cursor: pointer;
   color: var(--md-on-surface);
 }
-.rep:hover { background: var(--md-surface-container-high); }
-.rep:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
-.rep--active { background: var(--md-secondary-container); }
+.rep:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+.rep--active { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
 .rep-title { font: var(--md-title-small); }
 .rep-meta { font: var(--md-body-small); color: var(--md-on-surface-variant); }
-.ai-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.ai-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .headline { font: var(--md-title-large); margin: var(--space-2) 0; }
 .narrative { font: var(--md-body-medium); }
 .actions { margin: var(--space-3) 0; padding-left: 18px; color: var(--md-on-surface-variant); }
 .foot { border-top: 1px solid var(--md-outline-variant); padding-top: var(--space-2); margin-top: var(--space-3); }
 .small { font: var(--md-body-small); }
-@media (max-width: 1000px) {
-  .split, .split-2 { grid-template-columns: minmax(0, 1fr); }
-}
 </style>

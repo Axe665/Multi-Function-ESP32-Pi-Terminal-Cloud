@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, fmtDay, fmtTime } from '../api'
-import PageHeader from '../components/PageHeader.vue'
+import PageLead from '../components/PageLead.vue'
 import ChartBox from '../components/ChartBox.vue'
 import { chartTokens, useTheme } from '../lib/theme'
 import 'echarts-wordcloud'
@@ -126,50 +126,53 @@ const wordOption = computed(() => {
 </script>
 
 <template>
-  <PageHeader
-    :title="device ? device.device_id : '设备'"
-    :sub="device ? `${device.edge_id}，${device.scene || '—'}，在线：${device.online ? '是' : '否'}` : ''"
-  >
-    <RouterLink class="md-btn md-btn--text" to="/edges">返回边与设备</RouterLink>
-  </PageHeader>
-
   <p v-if="error" class="error">{{ error }}</p>
 
-  <template v-if="device">
-    <section class="md-card">
-      <div class="section-head">
+  <PageLead :sub="device ? `${device.edge_id}，${device.scene || '—'}，在线：${device.online ? '是' : '否'}` : ''">
+    <RouterLink class="md-btn md-btn--text" to="/edges">返回边与设备</RouterLink>
+  </PageLead>
+
+  <div class="md-grid" v-if="device">
+    <section class="md-card span-8 card-trend">
+      <div class="md-card-head">
         <h2>趋势</h2>
-        <select v-model="metric" class="md-field" aria-label="选择指标">
-          <option v-for="m in device.metrics" :key="m" :value="m">{{ label(m) }}（{{ unit(m) }}）</option>
-        </select>
+        <label class="md-field metric-pick">
+          <span>指标</span>
+          <select v-model="metric">
+            <option v-for="m in device.metrics" :key="m" :value="m">{{ label(m) }}（{{ unit(m) }}）</option>
+          </select>
+        </label>
       </div>
-      <ChartBox :option="seriesOption" height="260px" />
+      <ChartBox :option="seriesOption" height="288px" :label="`${device.device_id} 趋势`" />
     </section>
 
-    <section class="md-card strip">
-      <div class="section-head">
+    <section class="md-card span-4 card-trend">
+      <div class="md-card-head">
         <h2>按日聚合</h2>
-        <span class="md-muted">{{ label(metric) }}，色深为当日均值（云端没有小时粒度）</span>
+        <span class="meta">色深为当日均值</span>
       </div>
-      <ChartBox :option="heatOption" height="140px" />
+      <div class="chart-fill">
+        <ChartBox :option="heatOption" height="100%" :label="`${label(metric)} 按日聚合`" />
+      </div>
     </section>
 
-    <div class="duo">
-      <section class="md-card">
-        <div class="section-head">
-          <h2>词云</h2>
-          <span class="md-muted">该边最近 7 天的建议用词</span>
-        </div>
-        <ChartBox :option="wordOption" height="280px" />
-      </section>
+    <section class="md-card span-5 card-low">
+      <div class="md-card-head">
+        <h2>词云</h2>
+        <span class="meta">该边最近 7 天的建议用词</span>
+      </div>
+      <div class="chart-fill">
+        <ChartBox :option="wordOption" height="100%" label="建议文本词云" />
+      </div>
+    </section>
 
-      <section class="md-card advice">
-      <div class="section-head">
+    <section class="md-card span-7 card-advice">
+      <div class="md-card-head">
         <h2>建议</h2>
-        <span class="md-muted">最近 {{ advice.length }} 条</span>
+        <span class="meta">最近 {{ advice.length }} 条</span>
       </div>
       <div class="md-list">
-        <div v-for="a in advice" :key="a.id" class="md-list-row">
+        <div v-for="a in advice" :key="a.id" class="md-list-item">
           <span class="sev-tag" :class="a.risk === 'alert' ? 'sev-tag--notice' : 'sev-tag--idle'">
             {{ a.risk === 'alert' ? '告警' : '关注' }}
           </span>
@@ -180,27 +183,22 @@ const wordOption = computed(() => {
         </div>
         <p v-if="!advice.length" class="md-muted">这台设备最近没有建议。</p>
       </div>
-      </section>
-    </div>
-  </template>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.error { color: var(--md-error); margin-bottom: var(--space-3); }
-.section-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: wrap;
+.error { color: var(--md-error); max-width: var(--content-max); margin: 0 auto var(--space-3); }
+.metric-pick { width: 240px; }
+.card-trend, .card-low, .card-advice {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.duo > .md-card { display: flex; flex-direction: column; }
-.duo .md-list { flex: 1; justify-content: space-around; }
-.duo {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4); margin-top: var(--space-4); align-items: stretch;
-}
-.advice { margin-top: 0; }
-.strip { margin-top: var(--space-4); }
+.card-trend { height: 360px; }
+.card-low { height: 300px; }
+.card-advice { min-height: 300px; }
+.chart-fill { flex: 1; min-height: 0; }
+.chart-fill :deep(div) { height: 100%; }
 .small { font: var(--md-body-small); }
-@media (max-width: 1000px) {
-  .duo { grid-template-columns: minmax(0, 1fr); }
-}
 </style>
