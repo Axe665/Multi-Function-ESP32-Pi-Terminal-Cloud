@@ -199,6 +199,6 @@ const wordOption = computed(() => {
 .card-low { height: 300px; }
 .card-advice { min-height: 300px; }
 .chart-fill { flex: 1; min-height: 0; }
-.chart-fill :deep(div) { height: 100%; }
+.chart-fill > :deep(div) { height: 100%; }
 .small { font: var(--md-body-small); }
 </style>

@@ -322,13 +322,15 @@ function drillCover(p) {
     <section class="md-card span-4 card-low">
       <div class="md-card-head">
         <h2>本周报告摘要</h2>
-        <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
+        <span class="head-right">
+          <span class="md-chip">{{ latest?.content?.confidence === 'high' ? '高置信' : '规则模板' }}</span>
+          <RouterLink class="md-btn md-btn--text" to="/reports">查看报告</RouterLink>
+        </span>
       </div>
       <article v-if="latest" class="brief">
         <h3>{{ latest.content.headline }}</h3>
         <p class="md-muted small">{{ latest.period_start }} – {{ latest.period_end }}，{{ latest.model }}</p>
         <p class="narrative">{{ latest.content.narrative }}</p>
-        <RouterLink class="md-btn md-btn--text" to="/reports">查看报告</RouterLink>
       </article>
       <p v-else class="md-muted">还没有报告。</p>
     </section>
@@ -362,17 +364,19 @@ function drillCover(p) {
   flex: 1;
   min-height: 0;
 }
-.chart-fill :deep(div) {
+.chart-fill > :deep(div) {
   height: 100%;
 }
 
 .brief h3 { font: var(--md-title-medium); margin-bottom: 2px; }
+.head-right { display: inline-flex; align-items: center; gap: var(--space-2); }
+.head-right .md-btn { height: 28px; padding: 0 6px; }
 .narrative {
   font: var(--md-body-small);
   color: var(--md-on-surface-variant);
   margin: var(--space-2) 0;
   display: -webkit-box;
-  -webkit-line-clamp: 7;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
