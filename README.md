@@ -134,8 +134,14 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
   `pg_restore`，用完连临时目录一起删。
 - **证书 SAN 跟着访问方式走**：`scripts/make_certs.py` 把 `CLOUD_DOMAIN` 与
   `CLOUD_ID`、`CLOUD_LAN_IP`、`CLOUD_DNS`（后三个配了才加）一起写进 443 站点
-  证书的 SAN，内网 IP 用 IPAddress SAN。换网段或换内部 DNS 名要重签并重启
-  caddy，否则浏览器会报证书与地址不匹配。
+  证书的 SAN，内网 IP 用 IPAddress SAN。
+- **换网段只重签服务器证书，别跑 `make_certs.py`**：那个脚本会新生成一颗 CA，
+  跑一次等于换信任根 —— 边的 `EDGE_CLOUD_CA` 指纹、mDNS 的 `ca_fp`、8443 的
+  trust_pool 全对不上。用 `scripts/resign_server_cert.py`（沿用现有 CA），再
+  `docker compose up -d --force-recreate caddy`。
+- **按 IP 访问需要默认 SNI**：浏览器和 curl 对 IP 字面量不发 SNI，Caddy 在
+  `:443` 上有多站点时选不到站点会直接回 internal error。Caddyfile 顶部的
+  全局块用 `default_sni` 兜住，改域名时一起改。
 - **mDNS 由宿主发布**：容器里广播的是容器 IP，边发现不到。跑一次
   `./scripts/install_avahi.sh`（它会读 `CLOUD_ID`、`CLOUD_DOMAIN` 和 cloud-ca 指纹，
   写 `/etc/avahi/services/orpi-cloud.service`）。没装 Avahi 时静态地址兜底。
