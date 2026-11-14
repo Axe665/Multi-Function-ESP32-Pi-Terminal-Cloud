@@ -28,6 +28,8 @@ x-cloud: &cloud
     CLOUD_DEMO_OPEN: ${CLOUD_DEMO_OPEN:-0}
     CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
     CLOUD_DEMO: ${CLOUD_DEMO:-1}
+    # mDNS 交给宿主 Avahi（scripts/install_avahi.sh）；容器里广播的是容器 IP
+    CLOUD_MDNS: ${CLOUD_MDNS:-0}
     CLOUD_BUILD: ${CLOUD_BUILD:-compose-dev}
     # 空库首次启动写 14 天演示数据；生产必须保持 0，否则真实库会混进假数据
     CLOUD_AUTOSEED: ${CLOUD_AUTOSEED:-0}

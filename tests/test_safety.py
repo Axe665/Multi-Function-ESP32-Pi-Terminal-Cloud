@@ -102,6 +102,30 @@ class BudgetTest(unittest.TestCase):
         self.assertEqual(store.counters().get("api_tokens"), 0)
 
 
+class KMinConfigTest(unittest.TestCase):
+    """k 门槛跟配置走，不能写死 5。"""
+
+    def _report(self) -> dict:
+        import json
+        path = ROOT / "contracts/vendor/edge/edge-report@v1.example.json"
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for row in report["telemetry_daily"]:
+            row["k"] = 5
+            row["n_subjects"] = max(row.get("n_subjects", 5), 5)
+        return report
+
+    def test_k_below_configured_min_is_rejected(self):
+        from cloud import models
+        old = config.K_MIN
+        config.K_MIN = 10
+        try:
+            with self.assertRaises(Exception):
+                models.EdgeReport.model_validate(self._report())
+        finally:
+            config.K_MIN = old
+        models.EdgeReport.model_validate(self._report())   # 默认门槛下这份能过
+
+
 class PublicPayloadTest(unittest.TestCase):
     """模式 A 只能拿到 L2：建议原文与词云词属于 L3，不许出网。"""
 

@@ -86,9 +86,11 @@ class EdgeReport(Strict):
 
     @model_validator(mode="after")
     def _no_low_k(self):
-        low = [r for r in self.telemetry_daily if r.k < 5]
+        # 门槛跟配置走：以前写死 5，把 CLOUD_K_MIN 调到 10 也只用 5 拦
+        from . import config
+        low = [r for r in self.telemetry_daily if r.k < config.K_MIN]
         if low:
-            raise ValueError(f"k<5 的聚合不允许上云（{len(low)} 行）")
+            raise ValueError(f"k<{config.K_MIN} 的聚合不允许上云（{len(low)} 行）")
         return self
 
 
