@@ -117,6 +117,9 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 - **备份加密要有密钥**：`docker/.secrets/backup.key`（0600）挂在 worker 里，
   路径由 `CLOUD_BACKUP_KEY_FILE` 指过去。缺了它每周加密副本会失败并写审计，
   `/health` 的 `backup.encrypt_fail` 会计数。
+- **mDNS 由宿主发布**：容器里广播的是容器 IP，边发现不到。跑一次
+  `./scripts/install_avahi.sh`（它会读 `CLOUD_ID`、`CLOUD_DOMAIN` 和 cloud-ca 指纹，
+  写 `/etc/avahi/services/orpi-cloud.service`）。没装 Avahi 时静态地址兜底。
 - **备份不许进仓库**：`backups/` 是 gitignore 的，CI 也会拦 `*.dump`/`*.gpg`/`*.bak`。
   历史里曾经提交过一批明文 dump，已经从当前树移除；旧提交里仍能翻到，彻底清理要重写历史。
 - **443 不代理 Ollama**：`/ollama/*` 只在 `127.0.0.1:8088` 上可用，443 明确 403。
