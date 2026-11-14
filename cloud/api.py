@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -14,7 +15,10 @@ router = APIRouter(prefix="/api/v1")
 
 def admin_guard(request: Request,
                 authorization: str | None = Header(default=None)) -> None:
-    """三种放行：bearer 令牌、登录会话、或本机演示（两个都没配）。"""
+    """放行只有三种：bearer 令牌、登录会话、或显式打开的演示开关。
+
+    以前「两个都没配」等于放行，默认部署就变成了任何人可读全库、可触发 AI 报告。
+    """
     if config.ADMIN_TOKEN and authorization == f"Bearer {config.ADMIN_TOKEN}":
         return
     if auth.required():
@@ -23,13 +27,34 @@ def admin_guard(request: Request,
         raise HTTPException(401, "需要登录")
     if config.ADMIN_TOKEN:
         raise HTTPException(401, "需要管理员令牌")
-
-
-def edge_guard(authorization: str | None = Header(default=None)) -> None:
-    if not config.EDGE_TOKEN:
+    if config.DEMO_OPEN:
         return
-    if authorization != f"Bearer {config.EDGE_TOKEN}":
-        raise HTTPException(401, "边证书或令牌无效")
+    raise HTTPException(
+        403,
+        "管理接口未配置鉴权：设置 CLOUD_ADMIN_PASSWORD 与 CLOUD_ADMIN_TOTP；"
+        "本机演示可显式设 CLOUD_DEMO_OPEN=1",
+    )
+
+
+def edge_guard(request: Request,
+               authorization: str | None = Header(default=None)) -> str:
+    """返回客户端证书的 CN（没有就返回空串）。
+
+    8443 上的证书链已经由 Caddy 验过，CN 是可信身份；没有证书时才退回共享令牌。
+    """
+    subject = request.headers.get("x-client-cn", "")
+    match = re.search(r"CN=([^,]+)", subject)
+    if match:
+        return match.group(1).strip()
+    if config.EDGE_TOKEN and authorization == f"Bearer {config.EDGE_TOKEN}":
+        return ""
+    if config.DEMO_OPEN:
+        return ""
+    raise HTTPException(
+        403,
+        "边上报告未鉴权：走 8443 的 mTLS，或配置 CLOUD_EDGE_TOKEN；"
+        "本机演示可显式设 CLOUD_DEMO_OPEN=1",
+    )
 
 
 admin = [Depends(admin_guard)]
@@ -72,9 +97,11 @@ def auth_logout(response: Response) -> dict[str, Any]:
 
 
 @router.post("/ingest/edge-report")
-def ingest(body: dict[str, Any],
-           authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    edge_guard(authorization)
+def ingest(body: dict[str, Any], cn: str = Depends(edge_guard)) -> dict[str, Any]:
+    # 证书 CN 就是边身份：不匹配就不许写别人的边、别人的设备
+    if cn and cn != str(body.get("edge_id", "")):
+        store.audit("edge", "ingest.cn_mismatch", body.get("edge_id", "?"), {"cn": cn})
+        raise HTTPException(403, "证书 CN 与 edge_id 不一致")
 
     hits = _raw_hits(body)
     if hits:

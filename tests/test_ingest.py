@@ -20,14 +20,49 @@ from tests.support import ensure_pg  # noqa: E402
 
 ensure_pg()
 
-from cloud import store  # noqa: E402
+from cloud import config, store  # noqa: E402
 from cloud.main import app  # noqa: E402
+
+# 没配凭据时接口默认 403（防止「没配」被当成「不用鉴权」）。
+# 这个文件里的用例按本机演示跑；门禁用例自己在 try/finally 里关掉再验。
+config.DEMO_OPEN = True
 
 EXAMPLE = ROOT / "contracts" / "vendor" / "edge" / "edge-report@v1.example.json"
 
 
 def example() -> dict:
     return json.loads(EXAMPLE.read_text(encoding="utf-8"))
+
+
+class IngestGuardTest(unittest.TestCase):
+    """没凭据时默认拒绝；有证书 CN 时必须与 edge_id 一致。"""
+
+    @classmethod
+    def setUpClass(cls):
+        store.init_db()
+        cls.client = TestClient(app)
+
+    def test_rejects_without_credentials(self):
+        from cloud import config
+        old = config.DEMO_OPEN
+        config.DEMO_OPEN = False
+        try:
+            r = self.client.post("/api/v1/ingest/edge-report", json=example())
+        finally:
+            config.DEMO_OPEN = old
+        self.assertEqual(r.status_code, 403)
+
+    def test_cert_cn_must_match_edge_id(self):
+        r = self.client.post("/api/v1/ingest/edge-report", json=example(),
+                             headers={"x-client-cn": "CN=some-other-edge,OU=mt-edge"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_cert_cn_match_is_accepted(self):
+        payload = example()
+        payload["report_id"] = "cn-match-0001"  # 别和去重用例撞同一份
+        r = self.client.post("/api/v1/ingest/edge-report", json=payload,
+                             headers={"x-client-cn": f"CN={payload['edge_id']},OU=mt-edge"})
+        self.assertEqual(r.status_code, 200, r.text)
 
 
 class IngestTest(unittest.TestCase):

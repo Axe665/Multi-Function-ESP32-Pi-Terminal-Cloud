@@ -10,6 +10,14 @@ jobs:
           python-version: "3.11"
       # 测试要拉起临时 Postgres，dev 依赖里带 pgserver，和 README 的本地步骤一致
       - run: pip install -r requirements-dev.txt
+      - name: 备份文件不许进仓库
+        run: |
+          tracked=$(git ls-files | grep -E '\.(dump|gpg|bak)$' || true)
+          if [ -n "$tracked" ]; then
+            echo "这些文件不该被跟踪（备份里是真实数据）："
+            echo "$tracked"
+            exit 1
+          fi
       - run: python -m unittest discover -s tests -t . -v
       - run: python scripts/sync_contracts.py --check
       # 边/云两仓的 tools/service-launch/ 必须字节相同，漏同步就红

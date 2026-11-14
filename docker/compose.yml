@@ -21,6 +21,8 @@ x-cloud: &cloud
     CLOUD_BACKUP_DIR: /backups
     CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
     CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
+    # 没配口令/令牌时管理接口默认 403；本机演示要显式打开
+    CLOUD_DEMO_OPEN: ${CLOUD_DEMO_OPEN:-0}
     CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
     CLOUD_DEMO: ${CLOUD_DEMO:-1}
     CLOUD_BUILD: ${CLOUD_BUILD:-compose-dev}
