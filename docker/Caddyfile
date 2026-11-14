@@ -24,6 +24,9 @@ http://:8088 {
 	}
 	# 管理 API 与前端（内网；管理接口本身还要过 admin_guard）
 	handle /api/* {
+		request_body {
+			max_size 2MB
+		}
 		reverse_proxy api:8002
 	}
 	handle {
@@ -41,6 +44,9 @@ http://:8088 {
 	}
 
 	handle /api/v1/ingest/edge-report {
+		request_body {
+			max_size 2MB
+		}
 		reverse_proxy api:8002 {
 			# 证书链已由上面的 client_auth 验过，CN 才是可信的边身份
 			header_up X-Client-CN {http.request.tls.client.subject}

@@ -37,11 +37,12 @@ _hits: dict[tuple[str, str], list[float]] = {}
 
 def create_app() -> FastAPI:
     store.init_db()
-    if os.environ.get("CLOUD_AUTOSEED") == "1" and not store.edges():
+    # 空库才写演示数据。只看 edges 不够：聚合有数据、边被清过的库也会被清掉
+    if os.environ.get("CLOUD_AUTOSEED") == "1" and not any(store.table_counts().values()):
         from . import seed
         seed.generate(14)
     app = FastAPI(title="Modular Terminal Cloud", version="1.0.0",
-                  description=DESCRIPTION, docs_url="/api/docs", redoc_url=None,
+                  description=DESCRIPTION, docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=lifespan)
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):

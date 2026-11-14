@@ -20,6 +20,7 @@ def admin_guard(request: Request,
     以前「两个都没配」等于放行，默认部署就变成了任何人可读全库、可触发 AI 报告。
     """
     if config.ADMIN_TOKEN and authorization == f"Bearer {config.ADMIN_TOKEN}":
+        store.audit("admin", "auth.token", request.url.path, {})
         return
     if auth.required():
         if auth.check_session(request.cookies.get(auth.COOKIE)):
@@ -80,12 +81,13 @@ def auth_state(request: Request) -> dict[str, Any]:
 
 
 @router.post("/auth/login")
-def auth_login(body: dict[str, Any], response: Response) -> dict[str, Any]:
+def auth_login(body: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
     result = auth.login(str(body.get("password", "")), str(body.get("code", "")))
     if not result["ok"]:
         # 锁定期间回 429，前端能显示还要等多久
         raise HTTPException(429 if result.get("wait") else 401, result["error"])
     response.set_cookie(auth.COOKIE, result["token"], httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https",
                         max_age=auth.SESSION_TTL, path="/")
     return {"ok": True}
 
@@ -105,7 +107,7 @@ def ingest(body: dict[str, Any], cn: str = Depends(edge_guard)) -> dict[str, Any
 
     hits = _raw_hits(body)
     if hits:
-        store.bump("raw_rejected")
+        store.bump("raw_rejected_local")
         store.audit("edge", "ingest.reject", body.get("edge_id", "?"), {"fields": hits[:5]})
         raise HTTPException(422, {"code": "RAW_PAYLOAD_REJECTED",
                                   "message": "云端只接受 L2 聚合，不接受原始字段",
@@ -120,8 +122,9 @@ def ingest(body: dict[str, Any], cn: str = Depends(edge_guard)) -> dict[str, Any
 
     result = store.ingest_report(msg.model_dump(by_alias=True))
     if not result["duplicate"]:
-        store.bump("suppressed_buckets", msg.privacy.suppressed_buckets)
-        store.bump("raw_rejected", msg.privacy.raw_rejected)
+        # 这两个数字是边自报的，单独记；审计页要分开展示，不能拿来当云侧的拦截证据
+        store.bump("reported_suppressed", msg.privacy.suppressed_buckets)
+        store.bump("reported_raw_rejected", msg.privacy.raw_rejected)
         store.bump("rows_ingested", result["rows"])
         store.audit("edge", "ingest.accept", msg.edge_id,
                     {"report_id": msg.report_id, "rows": result["rows"]})
@@ -205,8 +208,8 @@ def overview() -> dict[str, Any]:
         "alerts_total": len(alerts),
         "alerts_top": alerts_top,
         "k_min_seen": min([r["k"] for r in rows] or [0]),
-        "suppressed_buckets": counter.get("suppressed_buckets", 0),
-        "raw_rejected": counter.get("raw_rejected", 0),
+        "reported_suppressed": counter.get("reported_suppressed", 0),
+        "reported_raw_rejected": counter.get("reported_raw_rejected", 0),
         "latest_ai": latest[0] if latest else None,
         "ai_mode": config.AI_MODE,
         "edges": es,
@@ -417,7 +420,8 @@ def privacy_audit() -> dict[str, Any]:
     ks = [r["k"] for r in rows]
     dist: dict[str, int] = {}
     for k in ks:
-        b = "5" if k <= 5 else "6-7" if k <= 7 else "8-9" if k <= 9 else "10+"
+        # k<5 不应该存在；真出现了要单独看见，不能并进「5」里
+        b = "<5" if k < 5 else "5" if k == 5 else "6-7" if k <= 7 else "8-9" if k <= 9 else "10+"
         dist[b] = dist.get(b, 0) + 1
     c = store.counters()
     return {
@@ -425,8 +429,10 @@ def privacy_audit() -> dict[str, Any]:
         "rows": len(rows),
         "k_distribution": dist,
         "k_min_seen": min(ks) if ks else 0,
-        "suppressed_buckets": c.get("suppressed_buckets", 0),
-        "raw_rejected": c.get("raw_rejected", 0),
+        # 云侧自己拦的 vs 边自报的，分开写：混在一起就没法证明「0 漏网」
+        "raw_rejected_local": c.get("raw_rejected_local", 0),
+        "reported_suppressed": c.get("reported_suppressed", 0),
+        "reported_raw_rejected": c.get("reported_raw_rejected", 0),
         "rows_ingested": c.get("rows_ingested", 0),
         "report_count": len(store.reports(500)),
         "exports": [a for a in store.audit_log(50) if a["action"].startswith("export")],
@@ -439,6 +445,7 @@ def privacy_audit() -> dict[str, Any]:
 
 @router.get("/health")
 def health() -> dict[str, Any]:
+    counters = store.counters()
     try:
         with store.connect() as conn:
             conn.execute("SELECT 1").fetchone()
@@ -451,14 +458,21 @@ def health() -> dict[str, Any]:
         "edge_token": "set" if config.EDGE_TOKEN else "open",
         "admin_token": "set" if config.ADMIN_TOKEN else "open",
         "ai_mode": config.AI_MODE,
-        "ollama": config.OLLAMA_URL if config.AI_MODE == "local" else None,
+        # 不再回 Ollama 地址、队列名这类内网拓扑，扫描者拿不到攻击线索
         "gpu": gpu.status(),
         "model": ai.model_status() if config.AI_MODE == "local" else None,
         "edges": len(store.edges()), "devices": len(store.devices()),
-        "ingested_rows": store.counters().get("rows_ingested", 0),
+        "ingested_rows": counters.get("rows_ingested", 0),
         "auth_required": auth.required(),
-        "api_tokens_used": store.counters().get("api_tokens", 0),
+        "api_tokens_used": counters.get("api_tokens", 0),
         "api_budget": config.API_BUDGET_TOKENS,
-        "queue": queue.stats(),
-        "mdns": mdns.mdns.status(),
+        "mdns": {"on": mdns.mdns.status().get("on", False)},
+        # 备份与演练的结果要能被看见，不然「每周加密」失败了也没人知道
+        "backup": {
+            "ok": counters.get("backup_ok", 0),
+            "fail": counters.get("backup_fail", 0),
+            "encrypt_fail": counters.get("backup_encrypt_fail", 0),
+            "drill_ok": counters.get("backup_drill_ok", 0),
+            "drill_fail": counters.get("backup_drill_fail", 0),
+        },
     }

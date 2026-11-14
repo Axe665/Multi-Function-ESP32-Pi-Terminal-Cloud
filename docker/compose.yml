@@ -26,8 +26,10 @@ x-cloud: &cloud
     CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
     CLOUD_DEMO: ${CLOUD_DEMO:-1}
     CLOUD_BUILD: ${CLOUD_BUILD:-compose-dev}
-    # 空库首次启动自动写 14 天演示数据
-    CLOUD_AUTOSEED: "1"
+    # 空库首次启动写 14 天演示数据；生产必须保持 0，否则真实库会混进假数据
+    CLOUD_AUTOSEED: ${CLOUD_AUTOSEED:-0}
+    # 每周加密副本用的对称密钥；没有它就加密不了，worker 会写审计
+    CLOUD_BACKUP_KEY_FILE: /run/secrets/backup.key
     CLOUD_OLLAMA_URL: ${CLOUD_OLLAMA_URL:-http://ollama:11434}
     CLOUD_OLLAMA_MODEL: ${CLOUD_OLLAMA_MODEL:-qwen3.5:9b}
     CLOUD_OLLAMA_SHA256: ${CLOUD_OLLAMA_SHA256:-}
@@ -108,6 +110,8 @@ services:
       disable: true
     volumes:
       - ${CLOUD_BACKUP_HOST_DIR:-../backups}:/backups
+      - ${CLOUD_DATA_HOST_DIR:-../data}:/app/data
+      - ${CLOUD_BACKUP_KEY_HOST:-../.secrets/backup.key}:/run/secrets/backup.key:ro
     deploy:
       resources:
         limits:

@@ -117,7 +117,6 @@ def _summary(scope: str, scope_id: str | None, days: int = 7,
         # 摘要类任务要用到聚合结果
         "advice_counts": _advice_counts(scope_id),
         "words": [w["word"] for w in store.wordcloud(scope_id, days, dt.date.today().isoformat())[:8]],
-        "privacy": store.counters(),
     }
 
 
@@ -304,8 +303,27 @@ PROMPT = """你是端-边-云系统的数据分析助手。只根据给出的 JS
 
 
 def _budget_left() -> int:
-    used = store.counters().get("api_tokens", 0)
-    return max(0, config.API_BUDGET_TOKENS - used)
+    """额度按月算。旧实现只增不减，用满以后永久退化到规则模板。"""
+    month = int(dt.date.today().strftime("%Y%m"))
+    counters = store.counters()
+    seen = counters.get("api_tokens_month", 0)
+    if seen and seen != month:
+        store.set_counter("api_tokens", 0)
+        store.set_counter("api_tokens_month", month)
+        counters = store.counters()
+    return max(0, config.API_BUDGET_TOKENS - counters.get("api_tokens", 0))
+
+
+def _public_view(summary: dict[str, Any]) -> dict[str, Any]:
+    """模式 A 能出网的只有 L2：聚合指标 + 计数。
+
+    文档 §8.1 的硬规则是「公有 API 只接收 L2」，建议原文和词云词属于 L3，
+    它们的允许位置里没有第三方 API。
+    """
+    view = {k: summary[k] for k in ("scope", "scope_id", "from", "to", "devices") if k in summary}
+    view["metrics"] = [m for m in summary.get("metrics", []) if m.get("k_min", 0) >= config.K_MIN]
+    view["task"] = summary.get("task", "weekly_narrative")
+    return view
 
 
 def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
@@ -315,11 +333,12 @@ def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
     if _budget_left() <= 0:
         store.audit("system", "ai.budget", "public_api", {"result": "exhausted"})
         return None
+    payload_summary = _public_view(summary)
     body = {
         "model": config.PUBLIC_MODEL,
         "messages": [
             {"role": "system", "content": PROMPT},
-            {"role": "user", "content": json.dumps(summary, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps(payload_summary, ensure_ascii=False)},
         ],
         "response_format": {"type": "json_object"},
         "max_tokens": 800,
@@ -342,6 +361,7 @@ def _public_api(summary: dict[str, Any]) -> dict[str, Any] | None:
             data.setdefault("task", summary.get("task", "weekly_narrative"))
             usage = payload.get("usage") or {}
             store.bump("api_tokens", int(usage.get("total_tokens", 0)))
+            store.set_counter("api_tokens_month", int(dt.date.today().strftime("%Y%m")))
             return data
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             if attempt == 2:
@@ -442,9 +462,16 @@ def model_status() -> dict[str, Any]:
 
 def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
              task: str = "weekly_narrative",
-             period: tuple[str, str] | None = None) -> dict[str, Any]:
+             period: tuple[str, str] | None = None,
+             mode: str | None = None) -> dict[str, Any]:
+    """mode: local / api / rules。给了就按它跑，没给按配置。"""
     if task not in TASKS:
         task = "weekly_narrative"
+    picked = (mode or config.AI_MODE).lower()
+    if picked not in ("local", "api", "rules"):
+        picked = config.AI_MODE
+    if force_rules:
+        picked = "rules"
     summary = _summary(scope, scope_id, period=period)
     summary["task"] = task
     summary = _clip(summary)
@@ -459,12 +486,12 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
     model = "rules-v1"
     content: dict[str, Any] | None = None
 
-    if not force_rules:
-        if config.AI_MODE == "api":
+    if picked != "rules":
+        if picked == "api":
             content = _public_api(summary)
             if content:
                 model = config.PUBLIC_MODEL
-        elif config.AI_MODE == "local":
+        else:
             content = _ollama(summary)
             if content:
                 model = config.OLLAMA_MODEL

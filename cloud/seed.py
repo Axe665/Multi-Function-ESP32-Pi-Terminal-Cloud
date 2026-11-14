@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import os
 import json
 import random
 
@@ -62,6 +63,13 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
     alert_metric = ("temperature_c" if any(m["metric"] == "temperature_c" for m in alert_dev["metrics"])
                     else alert_dev["metrics"][0]["metric"])
 
+    # 最后一道路障：库里有东西就不许清。调用方（main.py）也判了空库，
+    # 但守卫只看 edges 时，「有聚合、没有边」这种状态会把数据一起删掉。
+    filled = {t: n for t, n in store.table_counts(
+        ("edges", "devices", "telemetry_daily", "advice", "reports")).items() if n}
+    if filled and os.environ.get("CLOUD_SEED_FORCE") != "1":
+        raise SystemExit(f"库里已有数据（{filled}），不写演示数据；确实要清空请设 CLOUD_SEED_FORCE=1")
+
     with store.connect() as conn:
         for table in ("telemetry_daily", "advice", "word_freq", "devices",
                       "edges", "counters", "ai_reports", "audit", "reports"):
@@ -70,8 +78,8 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
     for edge_id, edge_name in demo_fleet.EDGES:
         with store.connect() as conn:
             conn.execute(
-                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version)"
-                " VALUES(%s,%s,%s,%s,%s)",
+                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version, is_demo)"
+                " VALUES(%s,%s,%s,%s,%s,TRUE)",
                 (edge_id, edge_name, hashlib.sha256(edge_id.encode()).hexdigest()[:16],
                  store.now_ms(), "1.0.0"))
             for dev in fleet[edge_id]:
@@ -145,7 +153,7 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
                 "INSERT INTO word_freq(day, scope, word, count) VALUES(%s,%s,%s,%s)",
                 [(day, scope, w, c) for (day, scope, w), c in words.items()])
         conn.execute("INSERT INTO counters(key, value) VALUES('rows_ingested', %s)", (rows,))
-        conn.execute("INSERT INTO counters(key, value) VALUES('suppressed_buckets', %s)",
+        conn.execute("INSERT INTO counters(key, value) VALUES('reported_suppressed', %s)",
                      (suppressed * 12,))
 
     from . import ai, config
