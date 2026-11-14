@@ -77,9 +77,11 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
 
     for edge_id, edge_name in demo_fleet.EDGES:
         with store.connect() as conn:
+            # 演示边必须显式打开群体分析：默认关，不写 TRUE 的话演示数据
+            # 全被 VISIBLE_EDGES 挡掉，页面上一行都没有
             conn.execute(
-                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version, is_demo)"
-                " VALUES(%s,%s,%s,%s,%s,TRUE)",
+                "INSERT INTO edges(edge_id, name, cert_fp, last_seen, version,"
+                " group_analysis, is_demo) VALUES(%s,%s,%s,%s,%s,TRUE,TRUE)",
                 (edge_id, edge_name, hashlib.sha256(edge_id.encode()).hexdigest()[:16],
                  store.now_ms(), "1.0.0"))
             for dev in fleet[edge_id]:
@@ -164,6 +166,9 @@ def generate(days: int = 14, seed: int | None = None) -> dict[str, int]:
     store.audit("system", "seed.demo", "cloud",
                 {"operator": "seed", "build": config.BUILD, "days": days,
                  "rows": rows, "advice": adv_rows})
+    # 群体分析默认关，演示环境是显式打开的：这条审计说明「同意」是谁给的
+    store.audit("system", "consent.demo", "cloud",
+                {"group_analysis": True, "reason": "演示环境显式开启", "edges": len(demo_fleet.EDGES)})
     return {"rows": rows, "advice": adv_rows, "words": len(words),
             "days": days, "suppressed": suppressed}
 

@@ -6,8 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export CLOUD_PG_DSN="${CLOUD_PG_DSN:-postgresql://cloud:cloud@127.0.0.1:5432/cloud}"
-export CLOUD_REDIS_URL="${CLOUD_REDIS_URL:-redis://127.0.0.1:6379/0}"
+export CLOUD_PG_DSN="${CLOUD_PG_DSN:-postgresql://cloud:${CLOUD_DB_PASSWORD:-cloud}@127.0.0.1:5432/cloud}"
+# Redis 设了口令才把它拼进 URL（compose 里必填，本机裸装可以不设）
+export CLOUD_REDIS_URL="${CLOUD_REDIS_URL:-redis://${CLOUD_REDIS_PASSWORD:+:$CLOUD_REDIS_PASSWORD@}127.0.0.1:6379/0}"
 
 python3 - <<'PY'
 import sys

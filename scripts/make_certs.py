@@ -25,8 +25,14 @@ def main() -> None:
     edge_id = os.environ.get("EDGE_ID", "edge-lab-01")
 
     bundle = ca.make_ca()
-    server = ca.issue_server(bundle["cert_pem"], bundle["key_pem"], domain,
-                             extra_sans=["caddy", "mt-cloud-caddy"])
+    # 管理台除了域名还常按内网 IP 或内部 DNS 访问，这两个也写进 SAN；
+    # 环境变量没配就跳过，localhost + CLOUD_DOMAIN 照旧可用。
+    sans = ["caddy", "mt-cloud-caddy"]
+    for key in ("CLOUD_ID", "CLOUD_LAN_IP", "CLOUD_DNS"):
+        value = os.environ.get(key, "").strip()
+        if value and value not in sans:
+            sans.append(value)
+    server = ca.issue_server(bundle["cert_pem"], bundle["key_pem"], domain, extra_sans=sans)
     client = ca.issue_client(bundle["cert_pem"], bundle["key_pem"], edge_id)
     ca.write_bundle(out, bundle, server, client)
 

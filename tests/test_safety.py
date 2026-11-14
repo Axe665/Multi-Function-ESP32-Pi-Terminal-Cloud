@@ -1,6 +1,7 @@
 """数据安全的护栏：心跳只碰演示边、seed 不清有数据的库、预算按月重置。"""
 from __future__ import annotations
 
+import datetime as dt
 import os
 import sys
 import tempfile
@@ -18,7 +19,7 @@ from tests.support import ensure_pg  # noqa: E402
 
 ensure_pg()
 
-from cloud import ai, config, jobs, seed, store  # noqa: E402
+from cloud import ai, config, jobs, seed, store, worker  # noqa: E402
 
 
 def _ms(t: float) -> int:
@@ -100,6 +101,57 @@ class BudgetTest(unittest.TestCase):
         store.set_counter("api_tokens_month", 200001)   # 一个旧月份
         self.assertEqual(ai._budget_left(), config.API_BUDGET_TOKENS)
         self.assertEqual(store.counters().get("api_tokens"), 0)
+
+
+class PruneAuditTest(unittest.TestCase):
+    """幂等收件箱的删除数也要进 retention.prune 的明细。"""
+
+    def test_reports_count_is_in_the_audit_detail(self):
+        store.init_db()
+        with store.connect() as conn:
+            conn.execute("DELETE FROM audit")
+            conn.execute(
+                "INSERT INTO reports(edge_id, report_id, received_at, raw_bytes)"
+                " VALUES('e-old','r-old', now() - interval '400 days', 1)"
+                " ON CONFLICT DO NOTHING")
+        out = jobs.prune(retention_days=30)
+        self.assertGreaterEqual(out["reports"], 1)
+        detail = next(a["detail"] for a in store.audit_log(10) if a["action"] == "retention.prune")
+        self.assertGreaterEqual(detail["reports"], 1)
+
+
+class WorkerScheduleTest(unittest.TestCase):
+    """演练/加密失败后要能再试：失败不算成功，也不该锁死一整天以上。"""
+
+    def setUp(self):
+        store.init_db()
+        with store.connect() as conn:
+            conn.execute("DELETE FROM audit")
+        self.at_three = dt.datetime.combine(dt.date.today(), dt.time(3, 0)).timestamp()
+
+    def _audit_at(self, action: str, when_ms: int) -> None:
+        with store.connect() as conn:
+            conn.execute(
+                "INSERT INTO audit(actor, action, target, detail, created_at)"
+                " VALUES('system',%s,'cloud','{}',%s)", (action, store._ms(when_ms)))
+
+    def test_failed_drill_does_not_count_as_done(self):
+        month_start = self.at_three - 20 * 86400
+        self._audit_at("backup.drill_fail", int(self.at_three * 1000))
+        self.assertFalse(worker._drilled(month_start))
+        self.assertTrue(worker._drill_tried_today(self.at_three))
+        self._audit_at("backup.drill", int(self.at_three * 1000) + 60_000)
+        self.assertTrue(worker._drilled(month_start))
+
+    def test_encrypt_failure_is_retried_the_next_day(self):
+        self._audit_at("backup.encrypt_fail", int((self.at_three - 86400) * 1000))
+        self.assertFalse(worker._encrypted_today(self.at_three), "昨天的失败不该挡住今天")
+        self._audit_at("backup.encrypt_fail", int(self.at_three * 1000) + 60_000)
+        self.assertTrue(worker._encrypted_today(self.at_three), "今天试过就不再每分钟重试")
+
+    def test_encrypt_is_due_when_a_week_has_passed(self):
+        self._audit_at("backup.encrypt", int((self.at_three - 8 * 86400) * 1000))
+        self.assertTrue(worker._encrypt_due(self.at_three))
 
 
 class KMinConfigTest(unittest.TestCase):

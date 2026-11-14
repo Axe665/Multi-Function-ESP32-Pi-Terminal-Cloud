@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,14 @@ def make_ca(days: int = 3650) -> dict[str, Any]:
             "key_pem": _pem_key(key)}
 
 
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
 def _issue(ca_cert: x509.Certificate, ca_key: ec.EllipticCurvePrivateKey,
            common_name: str, sans: list[str], usage: x509.ObjectIdentifier,
            days: int) -> dict[str, str]:
@@ -69,8 +78,10 @@ def _issue(ca_cert: x509.Certificate, ca_key: ec.EllipticCurvePrivateKey,
                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
                .add_extension(x509.ExtendedKeyUsage([usage]), critical=False))
     if sans:
-        builder = builder.add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(s) for s in sans]), critical=False)
+        # 内网 IP 必须写成 IPAddress SAN，写成 DNSName 浏览器不认
+        names: list[Any] = [x509.IPAddress(ipaddress.ip_address(s)) if _is_ip(s)
+                            else x509.DNSName(s) for s in sans]
+        builder = builder.add_extension(x509.SubjectAlternativeName(names), critical=False)
     cert = builder.sign(ca_key, hashes.SHA256())
     return {"cert_pem": cert.public_bytes(serialization.Encoding.PEM).decode(),
             "key_pem": _pem_key(key)}

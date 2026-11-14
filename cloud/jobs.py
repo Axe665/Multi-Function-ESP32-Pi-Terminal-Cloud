@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 import psycopg
 import psycopg.conninfo
@@ -122,8 +124,30 @@ def run_backup() -> dict[str, Any]:
     return {"ok": True, "file": target.name, "bytes": size, "pruned": removed}
 
 
+def _decrypt(source: Path, target: Path) -> str:
+    """把加密副本解到 target；返回空串表示成功。"""
+    key_file = config.BACKUP_KEY_FILE
+    if not key_file:
+        return "没有配置 CLOUD_BACKUP_KEY_FILE，解不开加密副本"
+    # worker 以非 root 跑，HOME 不可写；给 gpg 一个临时 homedir
+    home = tempfile.mkdtemp(prefix="gpg-")
+    try:
+        res = subprocess.run(
+            ["gpg", "--homedir", home, "--batch", "--yes", "--quiet",
+             "--passphrase-file", str(key_file), "--output", str(target), "--decrypt",
+             str(source)],
+            capture_output=True, text=True, timeout=1800)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    return "" if res.returncode == 0 else (res.stderr or res.stdout)[-300:]
+
+
 def _encrypt(path) -> dict[str, Any]:
-    """每周的离线副本加密（age 不在镜像里，用 gpg 对称加密）。"""
+    """每周的离线副本加密（age 不在镜像里，用 gpg 对称加密）。
+
+    加密副本落在同一个目录：明文留着等于这份「加密备份」什么都没保护，
+    所以验过能解密就把明文删掉。校验不通过时保留明文，下次重试。
+    """
     key_file = config.BACKUP_KEY_FILE
     if not key_file:
         # 缺 key 时以前只是返回 False，调用方又把返回值丢了，等于悄悄没加密
@@ -134,19 +158,36 @@ def _encrypt(path) -> dict[str, Any]:
     target = path.with_suffix(path.suffix + ".gpg")
     # worker 以非 root 跑，HOME 不可写；给 gpg 一个临时 homedir
     home = tempfile.mkdtemp(prefix="gpg-")
-    res = subprocess.run(
-        ["gpg", "--homedir", home, "--batch", "--yes", "--symmetric", "--cipher-algo", "AES256",
-         "--passphrase-file", str(key_file), "--output", str(target), str(path)],
-        capture_output=True, text=True, timeout=600)
-    shutil.rmtree(home, ignore_errors=True)
+    try:
+        res = subprocess.run(
+            ["gpg", "--homedir", home, "--batch", "--yes", "--symmetric", "--cipher-algo", "AES256",
+             "--passphrase-file", str(key_file), "--output", str(target), str(path)],
+            capture_output=True, text=True, timeout=600)
+        # 解到 /dev/null：能读出全部包才算真加密成功（--list-packets 不读正文）
+        check = subprocess.run(
+            ["gpg", "--homedir", home, "--batch", "--yes", "--quiet",
+             "--passphrase-file", str(key_file), "--output", os.devnull, "--decrypt",
+             str(target)],
+            capture_output=True, text=True, timeout=600) if res.returncode == 0 else None
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
     if res.returncode != 0:
         store.audit("system", "backup.encrypt_fail", "cloud",
                     {"file": path.name, "error": res.stderr[-200:]})
         store.bump("backup_encrypt_fail")
         return {"ok": False, "error": res.stderr[-200:]}
+    if check is None or check.returncode != 0:
+        target.unlink(missing_ok=True)
+        detail = "解密校验失败" if check else "加密失败"
+        store.audit("system", "backup.encrypt_fail", "cloud",
+                    {"file": path.name, "error": detail})
+        store.bump("backup_encrypt_fail")
+        return {"ok": False, "error": detail}
+    size = target.stat().st_size
+    path.unlink(missing_ok=True)
     store.audit("system", "backup.encrypt", "cloud",
-                {"file": target.name, "bytes": target.stat().st_size})
-    return {"ok": True, "file": target.name, "bytes": target.stat().st_size}
+                {"file": target.name, "bytes": size, "plain_removed": path.name})
+    return {"ok": True, "file": target.name, "bytes": size}
 
 
 def _drill_fail(reason: str, **extra: Any) -> dict[str, Any]:
@@ -156,21 +197,36 @@ def _drill_fail(reason: str, **extra: Any) -> dict[str, Any]:
 
 
 def run_restore_drill() -> dict[str, Any]:
-    """每月一次的恢复演练：新库导入最新 dump，与备份时点的 meta 对账，然后删掉。"""
-    dumps = sorted(config.BACKUP_DIR.glob("cloud-*.dump"), key=lambda f: f.stat().st_mtime)
-    if not dumps:
+    """每月一次的恢复演练：新库导入最新备份，与备份时点的 meta 对账，然后删掉。
+
+    备份加密后明文会被删（见 _encrypt），所以候选有 .dump 和 .dump.gpg 两种：
+    取最新的那份，.gpg 先解密到临时文件再 pg_restore，用完随临时目录删掉。
+    """
+    cands = sorted(
+        [*config.BACKUP_DIR.glob("cloud-*.dump"), *config.BACKUP_DIR.glob("cloud-*.dump.gpg")],
+        key=lambda f: f.stat().st_mtime)
+    if not cands:
         return _drill_fail("没有可用的备份文件")
-    newest = dumps[-1]
-    meta_file = config.BACKUP_DIR / f"{newest.name}.meta.json"
+    newest = cands[-1]
+    plain = newest.with_suffix("") if newest.suffix == ".gpg" else newest
+    meta_file = config.BACKUP_DIR / f"{plain.name}.meta.json"
     meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else None
     started = time.time()
     name = f"cloud_drill_{time.strftime('%Y%m%d%H%M%S')}"
     admin = psycopg.conninfo.make_conninfo(config.PG_DSN)
     drill_dsn = psycopg.conninfo.make_conninfo(config.PG_DSN, dbname=name)
+    tmpdir: str | None = None
     try:
+        source = newest
+        if newest.suffix == ".gpg":
+            tmpdir = tempfile.mkdtemp(prefix="drill-")
+            source = Path(tmpdir) / plain.name
+            error = _decrypt(newest, source)
+            if error:
+                return _drill_fail("加密副本解不开", detail=error)
         with psycopg.connect(admin, autocommit=True, row_factory=dict_row) as conn:
             conn.execute(f'CREATE DATABASE "{name}"')
-        res = subprocess.run(["pg_restore", "--no-owner", "--no-acl", "--dbname", drill_dsn, str(newest)],
+        res = subprocess.run(["pg_restore", "--no-owner", "--no-acl", "--dbname", drill_dsn, str(source)],
                              capture_output=True, text=True, timeout=1800)
         # 客户端版本比服务端新时会带一句 SET transaction_timeout，服务端拒绝但数据照常恢复；
         # 真正的判定是 meta 对不对得上，不是 pg_restore 的退出码。
@@ -201,6 +257,8 @@ def run_restore_drill() -> dict[str, Any]:
         return {"ok": True, "file": newest.name, "counts": counts,
                 "latest_day": str(latest), "rto_s": took}
     finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
 
@@ -249,9 +307,11 @@ def prune(retention_days: int | None = None) -> dict[str, int]:
         # AI 报告属于 L3，文档 §8.1 写的是保留 1 年；以前这条表从来不删
         ai_reports = conn.execute(
             "DELETE FROM ai_reports WHERE created_at < %s", (text_cutoff,)).rowcount
-    if daily or adv or words or ai_reports:
+    if daily or adv or words or reports or ai_reports:
         store.audit("system", "retention.prune", "cloud",
-                    {"daily": daily, "advice": adv, "words": words, "ai_reports": ai_reports})
+                    {"daily": daily, "advice": adv, "words": words,
+                     # 幂等收件箱也是 L2 元数据，删了多少要和别的表记在同一条明细里
+                     "reports": reports, "ai_reports": ai_reports})
     return {"daily": daily, "advice": adv, "words": words, "reports": reports,
             "ai_reports": ai_reports}
 

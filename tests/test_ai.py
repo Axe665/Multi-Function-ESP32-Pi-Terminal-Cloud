@@ -51,6 +51,28 @@ class AiReportTest(unittest.TestCase):
         self.assertNotIn("<<<", out)
         self.assertLessEqual(len(out), 122)
 
+    def test_scrub_masks_names_places_and_numbers(self):
+        # 云端兜底脱敏，与边的词典同口径
+        self.assertEqual(ai.scrub("张先生家湿度偏低"), "[姓名]家湿度偏低")
+        self.assertEqual(ai.scrub("杭州市西湖区气温高"), "[地名][地名]气温高")
+        self.assertEqual(ai.scrub("联系 13812345678"), "联系 [手机号]")
+
+    def test_invalid_model_output_falls_back_to_rules(self):
+        """模型输出不合契约时落规则模板，不能把 500 抛到页面上。"""
+        old = ai._ollama
+        ai._ollama = lambda summary: {"schema": "ai.report.v1", "scope": "fleet"}  # 缺 headline 等
+        try:
+            out = ai.generate("fleet", None, mode="local",
+                              period=("2026-03-01", "2026-03-02"))
+        finally:
+            ai._ollama = old
+        self.assertEqual(out["status"], "fallback")
+        self.assertEqual(out["model"], "rules-v1")
+        self.assertTrue(out["content"]["narrative"])
+        self.assertEqual(store.report(out["id"])["status"], "fallback")
+        self.assertIn("ai.contract_fallback",
+                      {a["action"] for a in store.audit_log(30)})
+
     def test_explicit_period_is_respected(self):
         out = ai.generate("fleet", None, force_rules=True,
                           period=("2026-01-01", "2026-01-03"))
