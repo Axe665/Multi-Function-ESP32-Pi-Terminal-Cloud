@@ -139,6 +139,10 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
   跑一次等于换信任根 —— 边的 `EDGE_CLOUD_CA` 指纹、mDNS 的 `ca_fp`、8443 的
   trust_pool 全对不上。用 `scripts/resign_server_cert.py`（沿用现有 CA），再
   `docker compose up -d --force-recreate caddy`。
+- **浏览器第一次打开会报证书不受信**：cloud-ca 是私有 CA，名字对得上但系统不认。
+  把 `docker/certs/cloud-ca.crt` 导入系统或浏览器的受信根（Chrome/Edge 在
+  `chrome://settings/certificates` → 授权机构 → 导入；Firefox 有独立存储），
+  或者用 `curl --cacert docker/certs/cloud-ca.crt` 先确认链路是好的。
 - **按 IP 访问需要默认 SNI**：浏览器和 curl 对 IP 字面量不发 SNI，Caddy 在
   `:443` 上有多站点时选不到站点会直接回 internal error。Caddyfile 顶部的
   全局块用 `default_sni` 兜住，改域名时一起改。
