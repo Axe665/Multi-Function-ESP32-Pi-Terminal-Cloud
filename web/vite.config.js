@@ -13,6 +13,16 @@ export default defineConfig({
       },
     },
   },
+  // 冒烟测试用 preview 起静态站，/api 仍按开发时的代理走
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: process.env.CLOUD_API || 'https://localhost',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,

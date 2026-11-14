@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, fmtNum, fmtDay } from '../api'
-import PageHeader from '../components/PageHeader.vue'
+import PageLead from '../components/PageLead.vue'
 import ChartBox from '../components/ChartBox.vue'
 import { chartTokens, useTheme } from '../lib/theme'
 
@@ -85,58 +85,63 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <PageHeader title="对比" :sub="`同一指标在${scope === 'edges' ? '不同边' : '不同设备'}之间的走势，首日统一为 100，只比变化不比绝对值。`">
-    <select v-model="metric" class="md-field" aria-label="指标">
-      <option v-for="m in meta.metrics" :key="m.key" :value="m.key">
-        {{ m.label }}（{{ m.unit }}）
-      </option>
-    </select>
-    <select v-model="scope" class="md-field" aria-label="对比范围">
-      <option value="edges">按边</option>
-      <option value="devices">按设备</option>
-    </select>
-  </PageHeader>
-
   <p v-if="error" class="error">{{ error }}</p>
 
-  <section class="md-card">
-    <div class="section-head">
-      <h2>{{ scope === 'edges' ? '跨边走势' : '跨设备走势' }}</h2>
-      <span class="md-muted">{{ data?.metric }}，{{ (data?.days || []).length }} 天</span>
-    </div>
-    <ChartBox :option="option" height="320px" />
-  </section>
+  <PageLead :sub="`同一指标在${scope === 'edges' ? '不同边' : '不同设备'}之间的走势，首日统一为 100，只比变化不比绝对值。`">
+    <label class="md-field pick">
+      <span>指标</span>
+      <select v-model="metric">
+        <option v-for="m in meta.metrics" :key="m.key" :value="m.key">{{ m.label }}（{{ m.unit }}）</option>
+      </select>
+    </label>
+    <label class="md-field pick">
+      <span>对比范围</span>
+      <select v-model="scope">
+        <option value="edges">按边</option>
+        <option value="devices">按设备</option>
+      </select>
+    </label>
+  </PageLead>
 
-  <section class="md-card table">
-    <div class="section-head">
-      <h2>末日均值</h2>
-      <span class="md-muted">变化按首日归一到 100 折算</span>
-    </div>
-    <table class="md-table">
-      <thead>
-        <tr><th>{{ scope === 'edges' ? '边' : '设备' }}</th><th class="num">首日均值</th><th class="num">末日均值</th><th class="num">较首日</th><th class="num">最小 k</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="r in rows" :key="r.device_id || r.edge_id">
-          <td>{{ r.name }}<div class="md-mono md-muted">{{ r.edge_id }}</div></td>
-          <td class="num">{{ fmtNum(r.first?.value, 2) }}</td>
-          <td class="num">{{ fmtNum(r.last?.value, 2) }}</td>
-          <td class="num">
-            <span class="change">
-              {{ (r.last?.index ?? 100) >= 100 ? '+' : '−' }}{{ fmtNum(Math.abs((r.last?.index ?? 100) - 100), 1) }}%
-            </span>
-          </td>
-          <td class="num">{{ r.k_min }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+  <div class="md-grid">
+    <section class="md-card span-12">
+      <div class="md-card-head">
+        <h2>{{ scope === 'edges' ? '跨边走势' : '跨设备走势' }}</h2>
+        <span class="meta">{{ data?.metric }}，{{ (data?.days || []).length }} 天</span>
+      </div>
+      <ChartBox :option="option" height="320px" label="归一化后的走势对比" />
+    </section>
+
+    <section class="md-card span-12">
+      <div class="md-card-head">
+        <h2>末日均值</h2>
+        <span class="meta">变化按首日归一到 100 折算</span>
+      </div>
+      <table class="md-table">
+        <thead>
+          <tr><th>{{ scope === 'edges' ? '边' : '设备' }}</th><th class="num">首日均值</th><th class="num">末日均值</th><th class="num">较首日</th><th class="num">最小 k</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in rows" :key="r.device_id || r.edge_id">
+            <td>{{ r.name }}<div class="md-mono md-muted">{{ r.edge_id }}</div></td>
+            <td class="num">{{ fmtNum(r.first?.value, 2) }}</td>
+            <td class="num">{{ fmtNum(r.last?.value, 2) }}</td>
+            <td class="num">
+              <span class="change">
+                {{ (r.last?.index ?? 100) >= 100 ? '+' : '−' }}{{ fmtNum(Math.abs((r.last?.index ?? 100) - 100), 1) }}%
+              </span>
+            </td>
+            <td class="num">{{ r.k_min }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
 </template>
 
 <style scoped>
 /* 涨跌本身不是告警，颜色留给阈值突破 */
 .change { font-variant-numeric: tabular-nums; }
-.error { color: var(--md-error); margin-bottom: var(--space-3); }
-.section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
-.table { margin-top: var(--space-4); }
+.error { color: var(--md-error); max-width: var(--content-max); margin: 0 auto var(--space-3); }
+.pick { width: 220px; }
 </style>
