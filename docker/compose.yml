@@ -21,6 +21,9 @@ x-cloud: &cloud
     CLOUD_BACKUP_DIR: /backups
     CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
     CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
+    # 管理员登录：口令 + TOTP。留空等于没配，管理接口一律 403
+    CLOUD_ADMIN_PASSWORD: ${CLOUD_ADMIN_PASSWORD:-}
+    CLOUD_ADMIN_TOTP: ${CLOUD_ADMIN_TOTP:-}
     # 没配口令/令牌时管理接口默认 403；本机演示要显式打开
     CLOUD_DEMO_OPEN: ${CLOUD_DEMO_OPEN:-0}
     CLOUD_AI_MODE: ${CLOUD_AI_MODE:-local}
@@ -42,7 +45,8 @@ services:
     container_name: mt-cloud-caddy
     restart: unless-stopped
     ports:
-      - "443:443"
+      # 管理台只在内网：绑到 LAN 网卡，避免 0.0.0.0 被端口转发出去
+      - "${CLOUD_LAN_IP:-0.0.0.0}:443:443"
       - "80:80"
       - "8443:8443"   # 边 → 云的 mTLS 入口
       - "127.0.0.1:8088:8088"   # 本机明文入口，调试与截图用
