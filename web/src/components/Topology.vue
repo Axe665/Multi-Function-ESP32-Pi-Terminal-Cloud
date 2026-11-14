@@ -101,6 +101,10 @@ const option = computed(() => {
     series: [{
       type: 'graph',
       layout: 'none',
+      // 20 s 轮询会重算 option：merge 保住缩放与拖动，只让改动的节点动
+      animationDuration: 400,
+      animationDurationUpdate: 300,
+      animationEasingUpdate: 'cubicOut',
       roam: true,
       scaleLimit: { min: 0.6, max: 3 },
       draggable: true,
@@ -132,5 +136,5 @@ function pick(p) {
 </script>
 
 <template>
-  <ChartBox :option="option" height="100%" :on-click="pick" />
+  <ChartBox :option="option" :merge="true" height="100%" :on-click="pick" label="全网拓扑" />
 </template>

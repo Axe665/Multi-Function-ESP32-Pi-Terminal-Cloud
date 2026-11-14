@@ -7,6 +7,8 @@ const props = defineProps({
   option: { type: Object, default: () => ({}) },
   height: { type: String, default: '280px' },
   label: { type: String, default: '图表' },
+  // 拓扑这类带交互状态（缩放/拖动）的图必须 merge；数据图 notMerge 免得残留旧序列
+  merge: { type: Boolean, default: false },
 })
 
 const host = ref(null)
@@ -35,7 +37,7 @@ function apply() {
         },
       }
     : base
-  chart.setOption({ backgroundColor: 'transparent', ...option }, { notMerge: true })
+  chart.setOption({ backgroundColor: 'transparent', ...option }, { notMerge: !props.merge })
 }
 
 onMounted(() => {
