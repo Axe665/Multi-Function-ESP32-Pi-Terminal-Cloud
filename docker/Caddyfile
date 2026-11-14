@@ -22,12 +22,22 @@ http://:8088 {
 	handle /ollama/* {
 		respond "not exposed" 403
 	}
+	# 摄取只走 8443 的 mTLS 监听。这条必须排在 /api/* 前面：443 上没有
+	# client_auth，把 ingest 放进来等于让任何人自带 CN 头冒充边。
+	handle /api/v1/ingest/* {
+		respond "ingest only on 8443 with mTLS" 403
+	}
 	# 管理 API 与前端（内网；管理接口本身还要过 admin_guard）
 	handle /api/* {
 		request_body {
 			max_size 2MB
 		}
-		reverse_proxy api:8002
+		reverse_proxy api:8002 {
+			# 443 没有客户端证书，这个头一个都不许透传；清掉再检一遍请求，
+			# 免得以后新加的接口误信它
+			header_up X-Client-CN ""
+			header_up X-Forwarded-Client-Cert ""
+		}
 	}
 	handle {
 		reverse_proxy web:8080
