@@ -40,6 +40,9 @@ TEXT_RETENTION_DAYS = int(_env("CLOUD_TEXT_RETENTION_DAYS", "365"))
 # 演示模式：compose 里默认开，UI 会挂「演示模式」横幅（文档 §8.5）
 DEMO = _env("CLOUD_DEMO", "1") != "0"
 BUILD = _env("CLOUD_BUILD", "dev")
+# 管理接口与摄取都没有凭据配置时，默认拒绝。本机演示要显式打开这个开关，
+# 免得「没配口令」被当成「不用鉴权」。
+DEMO_OPEN = _env("CLOUD_DEMO_OPEN") == "1"
 
 # mDNS 广播 _orpi-cloud._tcp（文档 §6.1 / §5.9）
 MDNS_ENABLED = _env("CLOUD_MDNS", "1") != "0"

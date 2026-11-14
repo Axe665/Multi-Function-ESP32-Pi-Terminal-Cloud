@@ -102,6 +102,17 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 # 两个都要设：只配口令不配 TOTP 会拒绝登录（文档 §6.5）
 ```
 
+## 安全默认值（必读）
+
+- **管理接口默认拒绝**：没配 `CLOUD_ADMIN_PASSWORD` + `CLOUD_ADMIN_TOTP` 时，所有
+  `/api/v1/*`（除 `health` 与 `ingest`）返回 403。本机演示要显式设
+  `CLOUD_DEMO_OPEN=1`，这一项只适合单人机器，不要带到生产。
+- **边上报告要身份**：走 8443 时，Caddy 把已验证客户端证书的 CN 传给 api，
+  api 要求它与载荷里的 `edge_id` 一致；不经 mTLS 的路径要配 `CLOUD_EDGE_TOKEN`。
+- **备份不许进仓库**：`backups/` 是 gitignore 的，CI 也会拦 `*.dump`/`*.gpg`/`*.bak`。
+  历史里曾经提交过一批明文 dump，已经从当前树移除；旧提交里仍能翻到，彻底清理要重写历史。
+- **443 不代理 Ollama**：`/ollama/*` 只在 `127.0.0.1:8088` 上可用，443 明确 403。
+
 ## 静态加密（可选，生产建议）
 
 ```bash

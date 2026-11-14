@@ -69,6 +69,29 @@ class GuardTest(unittest.TestCase):
         config.ADMIN_TOTP = ""
         config.ADMIN_TOKEN = ""
 
+    def test_default_deny_without_any_credential(self):
+        """什么都没配时不能放行：默认部署不该是「任何人可读全库」。"""
+        config.ADMIN_PASSWORD = ""
+        config.ADMIN_TOTP = ""
+        old = config.DEMO_OPEN
+        config.DEMO_OPEN = False
+        try:
+            r = self.client.get("/api/v1/overview")
+        finally:
+            config.DEMO_OPEN = old
+        self.assertEqual(r.status_code, 403)
+
+    def test_demo_open_allows_local_use(self):
+        config.ADMIN_PASSWORD = ""
+        config.ADMIN_TOTP = ""
+        old = config.DEMO_OPEN
+        config.DEMO_OPEN = True
+        try:
+            r = self.client.get("/api/v1/overview")
+        finally:
+            config.DEMO_OPEN = old
+        self.assertNotIn(r.status_code, (401, 403))
+
     def test_protected_without_session(self):
         r = self.client.get("/api/v1/overview")
         self.assertEqual(r.status_code, 401)
