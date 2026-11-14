@@ -8,10 +8,12 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 import time
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from . import config, store
 
@@ -51,6 +53,50 @@ def _untrusted(text: Any, limit: int = 120) -> str:
     t = "".join(ch for ch in str(text) if ch >= " " and ch != "\x7f")
     t = t.replace("```", chr(39) * 3).replace("<<<", "《《").replace(">>>", "》》")
     return f"「{t[:limit]}」"
+
+
+# 与边仓 edge/privacy.py 同一套词典（号码类正则 + 姓氏/地名），够用即可，不引 NER。
+# 这是展示前的兜底：端侧脱敏才是第一道，云端不能替它兜住所有情况。
+_SCRUB = [
+    (re.compile(r"1[3-9]\d{9}"), "[手机号]"),
+    (re.compile(r"\b\d{17}[\dXx]\b"), "[证件号]"),
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "[邮箱]"),
+    (re.compile(r"\b(?:SN|SNR|序列号)[:：]?\s*[A-Z0-9][A-Z0-9-]{5,}\b"), "[设备号]"),
+    (re.compile(r"\b(?:mt|orpi)-[a-z0-9-]{3,}\b", re.I), "[设备号]"),
+]
+_SURNAMES = ("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水"
+             "窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝"
+             "邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹")
+_HONORIFICS = ["先生", "女士", "老师", "阿姨", "叔叔", "大爷", "大妈", "医生", "护士"]
+_PLACES = ["北京市", "上海市", "广州市", "深圳市", "杭州市", "成都市", "武汉市", "西安市",
+           "朝阳区", "海淀区", "浦东新区", "天河区", "西湖区", "高新区", "开发区"]
+
+
+def scrub(text: str) -> str:
+    out = str(text)
+    for pattern, replacement in _SCRUB:
+        out = pattern.sub(replacement, out)
+    # 只处理「张先生」「李女士」这种明确指人的写法，避免误伤普通名词
+    for h in _HONORIFICS:
+        out = re.sub(rf"[{_SURNAMES}]{{1,2}}{h}", "[姓名]", out)
+    for place in _PLACES:
+        out = out.replace(place, "[地名]")
+    return out
+
+
+def scrub_content(content: dict[str, Any]) -> dict[str, Any]:
+    """只改展示用的副本：库里保留模型原文，方便复核是谁写进去的。"""
+    out = dict(content)
+    for key in ("headline", "narrative"):
+        if isinstance(out.get(key), str):
+            out[key] = scrub(out[key])
+    if isinstance(out.get("findings"), list):
+        out["findings"] = [
+            {**f, **{k: scrub(f[k]) for k in ("label", "detail") if isinstance(f.get(k), str)}}
+            for f in out["findings"] if isinstance(f, dict)]
+    if isinstance(out.get("actions"), list):
+        out["actions"] = [scrub(a) if isinstance(a, str) else a for a in out["actions"]]
+    return out
 
 
 def _clip(summary: dict[str, Any], max_tokens: int = 8000) -> dict[str, Any]:
@@ -501,7 +547,15 @@ def generate(scope: str, scope_id: str | None = None, force_rules: bool = False,
         model = "rules-v1"
 
     from . import models
-    validated = models.AiReportContent.model_validate(content)
+    try:
+        validated = models.AiReportContent.model_validate(content)
+    except ValidationError as e:
+        # 模型输出不合契约就落规则模板：以前这里直接抛，页面拿到的是 500
+        store.audit("system", "ai.contract_fallback", "cloud",
+                    {"model": model, "error": str(e)[:200], "scope": scope})
+        content = _rules(summary, task)
+        model = "rules-v1"
+        validated = models.AiReportContent.model_validate(content)
 
     tokens_in = len(PROMPT) // 2 if model != "rules-v1" else 0
     tokens_out = len(json.dumps(content, ensure_ascii=False)) // 2 if model != "rules-v1" else 0

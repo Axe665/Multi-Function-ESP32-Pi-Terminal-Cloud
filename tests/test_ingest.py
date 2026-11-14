@@ -32,7 +32,10 @@ EXAMPLE = ROOT / "contracts" / "vendor" / "edge" / "edge-report@v1.example.json"
 
 
 def example() -> dict:
-    return json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    payload = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    # 示例契约里没有 group_analysis（默认关）；用例测的是「边明确同意」的路径
+    payload["privacy"]["group_analysis"] = True
+    return payload
 
 
 class IngestGuardTest(unittest.TestCase):
@@ -137,12 +140,56 @@ class IngestTest(unittest.TestCase):
         self.client.post("/api/v1/ingest/edge-report", json=payload)
         self.assertGreater(len(store.series("edge-consent-test", None, "consent_metric")), 0)
 
-    def test_low_k_rejected(self):
+    def test_low_k_row_is_dropped_not_the_whole_report(self):
+        # 与边一致按行丢：一条 k=4 不该把同批 k=8 的行一起打回
         payload = example()
-        payload["report_id"] = "lowk-test-0001"
-        payload["telemetry_daily"][0]["k"] = 4
+        payload["report_id"] = "lowk-test-0002"
+        payload["edge_id"] = "edge-lowk-01"
+        low, keep = payload["telemetry_daily"][0], payload["telemetry_daily"][1]
+        low["k"] = 4
+        low["metric"] = "lowk_dropped"
+        keep["k"] = 8
+        keep["metric"] = "lowk_kept"
+        payload["telemetry_daily"] = [low, keep]
+
+        before = store.counters().get("suppressed_buckets", 0)
         r = self.client.post("/api/v1/ingest/edge-report", json=payload)
-        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["rows"], 1)
+
+        rows = store.daily_rows(200, "edge-lowk-01")
+        self.assertEqual([x["metric"] for x in rows], ["lowk_kept"])
+        self.assertEqual(store.counters().get("suppressed_buckets", 0), before + 1)
+        self.assertIn("ingest.suppressed", {a["action"] for a in store.audit_log(20)})
+
+    def test_missing_group_analysis_means_off(self):
+        # 文档 §8.3：缺字段按「没同意」处理，老边不带就不参与群体分析
+        payload = example()
+        payload["report_id"] = "consent-default-0001"
+        payload["edge_id"] = "edge-no-consent"
+        payload["privacy"].pop("group_analysis")
+        r = self.client.post("/api/v1/ingest/edge-report", json=payload)
+        self.assertEqual(r.status_code, 200, r.text)
+        edge = next(e for e in store.edges() if e["edge_id"] == "edge-no-consent")
+        self.assertFalse(edge["group_analysis"])
+        self.assertEqual(store.daily_rows(10, "edge-no-consent"), [])
+
+    def test_edge_version_is_recorded(self):
+        # 文档 §6.2：edges.version 记边版本，缺字段写 unknown
+        payload = example()
+        payload["report_id"] = "ver-test-0001"
+        payload["edge_id"] = "edge-ver-01"
+        payload["edge_version"] = "2.3.1"
+        self.assertEqual(self.client.post("/api/v1/ingest/edge-report", json=payload).status_code, 200)
+        edge = next(e for e in store.edges() if e["edge_id"] == "edge-ver-01")
+        self.assertEqual(edge["version"], "2.3.1")
+
+        payload["report_id"] = "ver-test-0002"
+        payload["edge_id"] = "edge-ver-02"
+        payload.pop("edge_version")
+        self.assertEqual(self.client.post("/api/v1/ingest/edge-report", json=payload).status_code, 200)
+        edge = next(e for e in store.edges() if e["edge_id"] == "edge-ver-02")
+        self.assertEqual(edge["version"], "unknown")
 
     def test_rows_land_in_daily_table(self):
         payload = example()
@@ -186,6 +233,21 @@ class AuditTest(unittest.TestCase):
         self.assertEqual(sum(a["k_distribution"].values()), a["rows"])
         self.assertGreater(a["rows"], 0)
         self.assertGreaterEqual(a["k_min_seen"], 5)
+
+
+class SystemAlertTest(unittest.TestCase):
+    """文档 §6.2：原始字段上报不只计数，还要在总览里告警。"""
+
+    def test_raw_payload_rejection_raises_alert(self):
+        store.init_db()
+        c = TestClient(app)
+        payload = example()
+        payload["report_id"] = "raw-alert-0001"
+        payload["telemetry_daily"][0]["subject"] = "abc123"
+        self.assertEqual(c.post("/api/v1/ingest/edge-report", json=payload).status_code, 422)
+
+        kinds = [a["kind"] for a in c.get("/api/v1/overview").json()["alerts"]]
+        self.assertIn("raw_payload", kinds)
 
 
 if __name__ == "__main__":

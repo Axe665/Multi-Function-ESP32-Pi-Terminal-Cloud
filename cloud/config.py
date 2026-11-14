@@ -19,9 +19,16 @@ BACKUP_DIR = Path(_env("CLOUD_BACKUP_DIR", str(ROOT / "backups")))
 BACKUP_KEY_FILE = Path(_env("CLOUD_BACKUP_KEY_FILE", "")) if _env("CLOUD_BACKUP_KEY_FILE") else None
 
 # 主库：Postgres 16（文档 §6.2 的 DDL 直接可用）
-PG_DSN = _env("CLOUD_PG_DSN", "postgresql://cloud:cloud@127.0.0.1:5432/cloud")
+# 口令由 compose 的 CLOUD_DB_PASSWORD / CLOUD_REDIS_PASSWORD 提供；本机原生模式
+# 连 127.0.0.1，没设就按无口令（Redis 口令留空时 URL 不带它）。
+_DB_PASSWORD = _env("CLOUD_DB_PASSWORD", "cloud")
+_REDIS_PASSWORD = _env("CLOUD_REDIS_PASSWORD")
+PG_DSN = _env("CLOUD_PG_DSN",
+              f"postgresql://cloud:{_DB_PASSWORD}@127.0.0.1:5432/cloud")
 # 任务队列 + 缓存
-REDIS_URL = _env("CLOUD_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = _env("CLOUD_REDIS_URL",
+                 f"redis://:{_REDIS_PASSWORD}@127.0.0.1:6379/0" if _REDIS_PASSWORD
+                 else "redis://127.0.0.1:6379/0")
 # 测试与无 Redis 的演示：任务同步执行，不进队列
 QUEUE_SYNC = _env("CLOUD_QUEUE_SYNC", "0") == "1"
 
@@ -51,6 +58,9 @@ CA_CERT = Path(_env("CLOUD_CA_CERT", "/certs/cloud-ca.crt"))
 
 # 模式 B（默认）：本地 Ollama；模式 A：公有 API，默认关。
 AI_MODE = _env("CLOUD_AI_MODE", "local")
+# 模式 A 会把聚合发到公有 API，只能由部署方在配置里开；接口上的 mode 参数
+# 默认改不动它（见 api.ai_generate）。
+ALLOW_MODE_SWITCH = _env("CLOUD_ALLOW_MODE_SWITCH") == "1"
 OLLAMA_URL = _env("CLOUD_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 # 文档 §6.1/§6.3 定的是 Qwen3.5-9B q4；compose 也默认 qwen3.5:9b，这里别再留裸名字
 OLLAMA_MODEL = _env("CLOUD_OLLAMA_MODEL", "qwen3.5:9b")

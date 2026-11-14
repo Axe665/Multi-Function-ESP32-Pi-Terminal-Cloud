@@ -25,11 +25,13 @@ CREATE TABLE IF NOT EXISTS edges (
   cert_fp   TEXT,
   last_seen BIGINT,      -- 毫秒时间戳，INTEGER 装不下（文档写的是 INTEGER，这里是必要的修正）
   version   TEXT,
-  group_analysis BOOLEAN NOT NULL DEFAULT TRUE,
+  group_analysis BOOLEAN NOT NULL DEFAULT FALSE,   -- 文档 §8.3：默认关
   is_demo   BOOLEAN NOT NULL DEFAULT FALSE
 );
 -- 老库补列：群体分析开关随 edge-report 一起上报（文档 §8.5）
-ALTER TABLE edges ADD COLUMN IF NOT EXISTS group_analysis BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE edges ADD COLUMN IF NOT EXISTS group_analysis BOOLEAN NOT NULL DEFAULT FALSE;
+-- 老库改成默认关：以前建的表默认 TRUE，等于没同意也参与群体分析
+ALTER TABLE edges ALTER COLUMN group_analysis SET DEFAULT FALSE;
 -- 演示边单独标记：心跳只补给它们，别把真实边的 last_seen 一起刷新
 ALTER TABLE edges ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
 
@@ -243,9 +245,11 @@ def ingest_report(payload: dict[str, Any]) -> dict[str, Any]:
                VALUES(%s,%s,%s,%s,%s)
                ON CONFLICT(edge_id) DO UPDATE SET
                  name=EXCLUDED.name, last_seen=EXCLUDED.last_seen,
+                 version=COALESCE(NULLIF(EXCLUDED.version,'unknown'), edges.version),
                  group_analysis=EXCLUDED.group_analysis""",
-            (edge_id, payload.get("edge_name") or edge_id, now, "1.0.0",
-             payload["privacy"].get("group_analysis", True)))
+            (edge_id, payload.get("edge_name") or edge_id, now,
+             payload.get("edge_version") or "unknown",
+             payload["privacy"].get("group_analysis", False)))
         for d in payload["devices"]:
             conn.execute(
                 """INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen)

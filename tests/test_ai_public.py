@@ -19,7 +19,10 @@ from tests.support import ensure_pg  # noqa: E402
 
 ensure_pg()
 
+from fastapi.testclient import TestClient  # noqa: E402
+
 from cloud import ai, config, seed, store  # noqa: E402
+from cloud.main import app  # noqa: E402
 
 REPORT = {
     "schema": "ai.report.v1",
@@ -114,6 +117,33 @@ class PublicApiTest(unittest.TestCase):
         out = ai.generate("fleet", None)
         self.assertEqual(out["model"], "rules-v1")
         self.assertEqual(_Handler.calls, 0)
+
+
+class ModeSwitchGuardTest(unittest.TestCase):
+    """模式 A（公有 API）只能由部署方在配置里开，接口上的 mode 改不动它。"""
+
+    @classmethod
+    def setUpClass(cls):
+        store.init_db()
+        cls.client = TestClient(app)
+
+    def setUp(self):
+        self.old = (config.DEMO_OPEN, config.ALLOW_MODE_SWITCH, config.AI_MODE)
+        config.DEMO_OPEN = True
+        config.AI_MODE = "rules"
+        config.ALLOW_MODE_SWITCH = False
+
+    def tearDown(self):
+        config.DEMO_OPEN, config.ALLOW_MODE_SWITCH, config.AI_MODE = self.old
+
+    def test_mode_switch_is_refused_without_config(self):
+        r = self.client.post("/api/v1/ai/reports", json={"scope": "fleet", "mode": "api"})
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("CLOUD_ALLOW_MODE_SWITCH", r.json()["detail"])
+
+    def test_mode_rules_is_always_allowed(self):
+        r = self.client.post("/api/v1/ai/reports", json={"scope": "fleet", "mode": "rules"})
+        self.assertEqual(r.status_code, 200, r.text)
 
 
 if __name__ == "__main__":

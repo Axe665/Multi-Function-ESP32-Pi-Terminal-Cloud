@@ -63,6 +63,8 @@ class GuardTest(unittest.TestCase):
         config.ADMIN_PASSWORD = "correct horse"
         config.ADMIN_TOTP = SECRET
         config.ADMIN_TOKEN = ""
+        # 每个用例都从「没登录过」开始：TOTP 时间步是一次性的
+        store.set_counter("admin_totp_step", 0)
 
     def tearDown(self):
         config.ADMIN_PASSWORD = ""
@@ -130,6 +132,48 @@ class GuardTest(unittest.TestCase):
                              json={"password": "correct horse", "code": "000000"})
         self.assertEqual(r.status_code, 429, r.text)
         auth.reset_lockout()
+
+    def test_same_totp_code_cannot_be_replayed(self):
+        auth.reset_lockout()
+        import time
+        code = auth.totp(SECRET, at=int(time.time()))
+        body = {"password": "correct horse", "code": code}
+        first = self.client.post("/api/v1/auth/login", json=body)
+        self.assertEqual(first.status_code, 200, first.text)
+        second = self.client.post("/api/v1/auth/login", json=body)
+        self.assertEqual(second.status_code, 401, second.text)
+        self.assertIn("已用过", second.json()["detail"])
+
+    def test_lockout_is_per_ip(self):
+        auth.reset_lockout()
+        try:
+            for _ in range(auth.FAIL_MAX):
+                self.client.post("/api/v1/auth/login", json={"password": "x", "code": "000000"},
+                                 headers={"x-forwarded-for": "10.1.1.1"})
+            blocked = self.client.post("/api/v1/auth/login",
+                                       json={"password": "x", "code": "000000"},
+                                       headers={"x-forwarded-for": "10.1.1.1"})
+            self.assertEqual(blocked.status_code, 429, blocked.text)
+
+            import time
+            code = auth.totp(SECRET, at=int(time.time()))
+            other = self.client.post("/api/v1/auth/login",
+                                     json={"password": "correct horse", "code": code},
+                                     headers={"x-forwarded-for": "10.2.2.2"})
+            self.assertEqual(other.status_code, 200, other.text)
+        finally:
+            auth.reset_lockout()
+
+    def test_session_cookie_is_secure_behind_proxy(self):
+        """容器里 scheme 恒为 http，Secure 要靠 X-Forwarded-Proto。"""
+        auth.reset_lockout()
+        import time
+        code = auth.totp(SECRET, at=int(time.time()))
+        r = self.client.post("/api/v1/auth/login",
+                             json={"password": "correct horse", "code": code},
+                             headers={"x-forwarded-proto": "https"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("Secure", r.headers["set-cookie"])
 
     def test_wrong_totp(self):
         r = self.client.post("/api/v1/auth/login",

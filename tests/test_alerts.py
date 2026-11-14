@@ -33,6 +33,8 @@ class CloudAlertTest(unittest.TestCase):
             conn.execute("INSERT INTO edges(edge_id, name, last_seen) VALUES('e1','边一',%s)"
                          " ON CONFLICT (edge_id) DO UPDATE SET last_seen=EXCLUDED.last_seen",
                          (store.now_ms(),))
+            # 群体分析默认关，告警用例要看得到数据就得显式打开
+            conn.execute("UPDATE edges SET group_analysis=TRUE WHERE edge_id='e1'")
             conn.execute("INSERT INTO devices(device_id, edge_id, scene, modules_json, last_seen)"
                          " VALUES('d1','e1','实验室','[]',%s)"
                          " ON CONFLICT (device_id) DO UPDATE SET edge_id=EXCLUDED.edge_id",

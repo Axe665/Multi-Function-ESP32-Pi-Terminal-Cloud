@@ -39,12 +39,13 @@ def _scheduler_loop() -> None:
             if now >= at_three:
                 if not store.audit_since("backup.done", int(at_three * 1000)):
                     jobs.run_backup()
-                # 文档 §6.7：每周一份加密离线副本。当天没加密成功就隔天再试，
-                # 别等下一个周日
-                if today.weekday() == 6 and not _encrypted_today(at_three):
+                # 文档 §6.7：每周一份加密离线副本。到期（周日，或上次成功已过一周）
+                # 且今天还没试过才做——当天失败隔天会再试，别等下一个周日
+                if _encrypt_due(at_three) and not _encrypted_today(at_three):
                     _encrypt_latest()
             month_start = dt.datetime.combine(today.replace(day=1), dt.time(0, 0)).timestamp()
-            if today.day == 1 and not _drilled(month_start):
+            # 每月一次恢复演练；失败就隔天再试（当天只试一次，成功后本月不再做）
+            if not _drilled(month_start) and not _drill_tried_today(at_three):
                 jobs.run_restore_drill()
         except Exception as e:  # noqa: BLE001 —— 排期线程不能死
             store.audit("system", "worker.schedule_error", "cloud", {"error": str(e)[:200]})
@@ -65,8 +66,15 @@ if __name__ == "__main__":
     main()
 
 
+def _encrypt_due(at_three: float) -> bool:
+    """加密副本到期了没：周日，或上一次成功已经超过一周（上次失败过就得补）。"""
+    if dt.date.today().weekday() == 6:
+        return True
+    return not store.audit_since("backup.encrypt", int((at_three - 6 * 86400) * 1000))
+
+
 def _encrypted_today(at_three: float) -> bool:
-    """今天已经加密成功（或已经失败过一次，避免每分钟重试）。"""
+    """今天已经试过（成功或失败）——失败只在当天算，隔天重试。"""
     since = int(at_three * 1000)
     return (store.audit_since("backup.encrypt", since)
             or store.audit_since("backup.encrypt_fail", since))
@@ -79,6 +87,12 @@ def _encrypt_latest() -> None:
 
 
 def _drilled(month_start: float) -> bool:
-    """本月演练过（成功或失败）。失败时第二天会再试。"""
-    since = int(month_start * 1000)
-    return store.audit_since("backup.drill", since) or store.audit_since("backup.drill_fail", since)
+    """本月演练成功过。失败不算：演练失败恰恰是第二天要继续试的理由。"""
+    return store.audit_since("backup.drill", int(month_start * 1000))
+
+
+def _drill_tried_today(at_three: float) -> bool:
+    """今天已经试过演练（成功或失败），免得每分钟重跑一次导入。"""
+    since = int(at_three * 1000)
+    return (store.audit_since("backup.drill", since)
+            or store.audit_since("backup.drill_fail", since))

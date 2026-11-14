@@ -62,8 +62,9 @@ class ReportPrivacy(Strict):
     subjects_total: int = 0
     # 边在关掉个性化时带 false（文档 §8.5）；可选字段，老边不带也能收
     personalization: bool = True
-    # 边在关掉群体分析时带 false：只上报在线/健康计数
-    group_analysis: bool = True
+    # 文档 §8.3/§11.1：群体分析必须显式开启。缺字段按关处理，
+    # 否则老边（不带这个字段）会被默认当成同意了群体分析。
+    group_analysis: bool = False
 
 
 class Period(Strict):
@@ -76,6 +77,8 @@ class EdgeReport(Strict):
     report_id: str = Field(min_length=8, max_length=64)
     edge_id: str
     edge_name: str = ""
+    # 文档 §6.2 要求记边版本；§7.3.1 允许加可选字段，老边不带就写 unknown
+    edge_version: str = ""
     sent_at: int
     period: Period
     devices: list[ReportDevice] = Field(default_factory=list, max_length=64)

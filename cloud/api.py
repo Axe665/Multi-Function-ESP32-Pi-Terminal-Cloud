@@ -82,13 +82,19 @@ def auth_state(request: Request) -> dict[str, Any]:
 
 @router.post("/auth/login")
 def auth_login(body: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
-    result = auth.login(str(body.get("password", "")), str(body.get("code", "")))
+    # 失败计数按来源 IP 记；uvicorn 配了 --forwarded-allow-ips，XFF 是 Caddy 写的
+    xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    ip = xff or (request.client.host if request.client else "")
+    result = auth.login(str(body.get("password", "")), str(body.get("code", "")), ip)
     if not result["ok"]:
         # 锁定期间回 429，前端能显示还要等多久
         raise HTTPException(429 if result.get("wait") else 401, result["error"])
+    # Caddy 在前面终止 TLS，容器里 request.url.scheme 恒为 http；
+    # api 端口没发布到宿主、只有 Caddy 连得到，所以 X-Forwarded-Proto 可信。
+    secure = (request.url.scheme == "https"
+              or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https")
     response.set_cookie(auth.COOKIE, result["token"], httponly=True, samesite="lax",
-                        secure=request.url.scheme == "https",
-                        max_age=auth.SESSION_TTL, path="/")
+                        secure=secure, max_age=auth.SESSION_TTL, path="/")
     return {"ok": True}
 
 
@@ -96,6 +102,16 @@ def auth_login(body: dict[str, Any], request: Request, response: Response) -> di
 def auth_logout(response: Response) -> dict[str, Any]:
     response.delete_cookie(auth.COOKIE, path="/")
     return {"ok": True}
+
+
+def _is_low_k(row: Any) -> bool:
+    """k 不是整数就交给模型校验，别在这里替它判断。"""
+    if not isinstance(row, dict):
+        return False
+    try:
+        return int(row.get("k")) < config.K_MIN
+    except (TypeError, ValueError):
+        return False
 
 
 @router.post("/ingest/edge-report")
@@ -112,6 +128,16 @@ def ingest(body: dict[str, Any], cn: str = Depends(edge_guard)) -> dict[str, Any
         raise HTTPException(422, {"code": "RAW_PAYLOAD_REJECTED",
                                   "message": "云端只接受 L2 聚合，不接受原始字段",
                                   "fields": hits[:5]})
+    # k 门槛与边一致按行丢：整份拒收会让一条低 k 桶把同批合格行一起打回
+    rows = body.get("telemetry_daily")
+    if isinstance(rows, list):
+        kept = [r for r in rows if not _is_low_k(r)]
+        dropped = len(rows) - len(kept)
+        if dropped:
+            body = {**body, "telemetry_daily": kept}
+            store.bump("suppressed_buckets", dropped)
+            store.audit("edge", "ingest.suppressed", body.get("edge_id", "?"),
+                        {"rows": dropped, "k_min": config.K_MIN})
     try:
         msg = models.EdgeReport.model_validate(body)
     except ValidationError as e:
@@ -186,6 +212,11 @@ def overview() -> dict[str, Any]:
 
     latest = store.reports(1)
     counter = store.counters()
+    # 文档 §6.2：原始字段上报要「拒收并告警」，不能只留一个计数
+    system_alerts = []
+    if store.audit_since("ingest.reject", now - 86_400_000):
+        system_alerts.append({"scope": "cloud", "kind": "raw_payload", "severity": "critical",
+                              "text": "近 24 小时有原始字段上报被拒收"})
     return {
         "status": {
             "level": status_level,
@@ -207,6 +238,8 @@ def overview() -> dict[str, Any]:
         "rows_7d": len(rows),
         "alerts_total": len(alerts),
         "alerts_top": alerts_top,
+        # 系统级告警（原始字段上报被拒收等），与按设备聚合的 alerts_top 不是一回事
+        "alerts": system_alerts,
         "k_min_seen": min([r["k"] for r in rows] or [0]),
         "reported_suppressed": counter.get("reported_suppressed", 0),
         "reported_raw_rejected": counter.get("reported_raw_rejected", 0),
@@ -309,7 +342,8 @@ def wordcloud(days: int = Query(default=7, ge=1, le=30), scope: str | None = Non
 @router.get("/advice", dependencies=admin)
 def advice(edge: str | None = None, risk: str | None = None,
            limit: int = Query(default=40, ge=1, le=200)) -> list[dict[str, Any]]:
-    return store.advice(edge, risk, limit)
+    # 展示前再过一遍脱敏：这是兜底，不能替代端侧脱敏（见 ai.scrub）
+    return [{**a, "text": ai.scrub(a["text"])} for a in store.advice(edge, risk, limit)]
 
 
 @router.get("/daily/counts", dependencies=admin)
@@ -377,6 +411,7 @@ def ai_report(report_id: int) -> dict[str, Any]:
     r = store.report(report_id)
     if not r:
         raise HTTPException(404, "报告不存在")
+    r["content"] = ai.scrub_content(r["content"])
     return r
 
 
@@ -389,6 +424,10 @@ def ai_generate(body: dict[str, Any]) -> dict[str, Any]:
     if scope != "fleet" and not scope_id:
         raise HTTPException(400, "edge / device 必须给 scope_id")
     mode = body.get("mode", config.AI_MODE)
+    # 模式 A 会把 L2 发去公有 API，不能让一次请求就切过去
+    if "mode" in body and str(mode) != "rules" and not config.ALLOW_MODE_SWITCH:
+        raise HTTPException(400, "模式 A 必须由部署方在配置里开启"
+                                 "（CLOUD_ALLOW_MODE_SWITCH=1）；接口只能切到 rules")
     task = body.get("task", "weekly_narrative")
     if task not in ai.TASKS:
         raise HTTPException(400, f"task 只能是 {'/'.join(ai.TASKS)}")
@@ -405,7 +444,9 @@ def ai_generate(body: dict[str, Any]) -> dict[str, Any]:
     # 文档 §6.1：AI 报告在 worker 里生成。等不及就返回 job_id，前端再查。
     out = queue.submit("generate_report", scope, scope_id, task, mode, period, wait=120)
     if out["status"] == "done":
-        return out["result"]
+        result = dict(out["result"])
+        result["content"] = ai.scrub_content(result.get("content") or {})
+        return result
     if out["status"] == "failed":
         raise HTTPException(500, f"报告生成失败：{out.get('error', '')}")
     return {"queued": True, "job_id": out["job_id"], "scope": scope, "task": task}

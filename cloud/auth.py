@@ -20,24 +20,37 @@ COOKIE = "mt_session"
 SESSION_TTL = 12 * 3600
 STEP = 30  # TOTP 步长
 
-# 登录失败锁定：10 分钟内错 5 次就等窗口过去。单管理员，进程内记着就够。
+# 登录失败锁定：单 IP 10 分钟内错 5 次就等窗口过去；全站再留一个很宽的兜底。
+# 进程内记账够用（单容器单管理员），换 IP 重试也照样受限。
 FAIL_MAX = 5
 FAIL_WINDOW = 600
-_fails: list[float] = []
+GLOBAL_FAIL_MAX = 50
+_fails: dict[str, list[float]] = {}
 
 
 def _prune_fails(now: float) -> None:
     cutoff = now - FAIL_WINDOW
-    _fails[:] = [t for t in _fails if t >= cutoff]
+    for ip in list(_fails):
+        _fails[ip] = [t for t in _fails[ip] if t >= cutoff]
+        if not _fails[ip]:
+            del _fails[ip]
 
 
-def locked_for(now: float | None = None) -> int:
+def _wait(times: list[float], limit: int, at: float) -> int:
+    if len(times) < limit:
+        return 0
+    return max(1, int(FAIL_WINDOW - (at - times[0])))
+
+
+def locked_for(ip: str = "", now: float | None = None) -> int:
     """还要锁多少秒；0 表示没锁。"""
     at = time.time() if now is None else now
     _prune_fails(at)
-    if len(_fails) < FAIL_MAX:
-        return 0
-    return max(1, int(FAIL_WINDOW - (at - _fails[0])))
+    wait = _wait(_fails.get(ip or "-", []), FAIL_MAX, at)
+    if wait:
+        return wait
+    total = [t for times in _fails.values() for t in times]
+    return _wait(sorted(total), GLOBAL_FAIL_MAX, at)
 
 
 def reset_lockout() -> None:
@@ -49,7 +62,7 @@ def reset_lockout() -> None:
 def totp(secret: str, at: int | None = None, step: int = STEP, digits: int = 6) -> str:
     """RFC 6238（HMAC-SHA1），与手机上的验证器一致。"""
     key = base64.b32decode(secret.upper() + "=" * ((8 - len(secret) % 8) % 8))
-    counter = int((at or time.time()) // step)
+    counter = int((at if at is not None else time.time()) // step)
     msg = struct.pack(">Q", counter)
     digest = hmac.new(key, msg, hashlib.sha1).digest()
     offset = digest[-1] & 0x0F
@@ -57,10 +70,18 @@ def totp(secret: str, at: int | None = None, step: int = STEP, digits: int = 6) 
     return str(code % (10 ** digits)).zfill(digits)
 
 
+def totp_step(secret: str, code: str, at: int | None = None, window: int = 1) -> int | None:
+    """命中的时间步号；返回步号而不是 bool，才能挡住同一步的第二次登录。"""
+    now = at if at is not None else int(time.time())
+    for k in range(-window, window + 1):
+        step = now // STEP + k
+        if hmac.compare_digest(totp(secret, step * STEP), code):
+            return step
+    return None
+
+
 def verify_totp(secret: str, code: str, at: int | None = None, window: int = 1) -> bool:
-    now = at or int(time.time())
-    return any(hmac.compare_digest(totp(secret, now + k * STEP), code)
-               for k in range(-window, window + 1))
+    return totp_step(secret, code, at, window) is not None
 
 
 # ---------------------------------------------------------------- 会话
@@ -100,18 +121,19 @@ def check_password(password: str) -> bool:
     return hmac.compare_digest(password, config.ADMIN_PASSWORD)
 
 
-def login(password: str, code: str) -> dict[str, Any]:
+def login(password: str, code: str, ip: str = "") -> dict[str, Any]:
     if not required():
         return {"ok": True, "token": issue_session()}
-    wait = locked_for()
+    wait = locked_for(ip)
     if wait:
-        store.audit("anon", "auth.login", "admin", {"result": "locked", "wait": wait})
+        store.audit("anon", "auth.login", "admin",
+                    {"result": "locked", "wait": wait, "ip": ip})
         return {"ok": False, "error": f"失败次数过多，{wait // 60 + 1} 分钟后再试", "wait": wait}
 
     def fail(reason: str, message: str) -> dict[str, Any]:
-        _fails.append(time.time())
+        _fails.setdefault(ip or "-", []).append(time.time())
         store.audit("anon", "auth.login", "admin",
-                    {"result": reason, "fails": len(_fails), "window": FAIL_WINDOW})
+                    {"result": reason, "ip": ip, "window": FAIL_WINDOW})
         return {"ok": False, "error": message}
 
     if not check_password(password):
@@ -119,10 +141,15 @@ def login(password: str, code: str) -> dict[str, Any]:
     if not config.ADMIN_TOTP:
         # 文档 §6.5：管理员账号 + TOTP；只配口令等于少一道因子
         return fail("totp_missing", "管理员未配置 TOTP，已拒绝仅口令登录")
-    if not verify_totp(config.ADMIN_TOTP, code):
+    step = totp_step(config.ADMIN_TOTP, code)
+    if step is None:
         return fail("bad_totp", "动态码不正确或已过期")
-    _fails.clear()
-    store.audit("admin", "auth.login", "admin", {"result": "ok"})
+    # 同一时间步只成功一次：抓到一个码也无法在 30 秒窗口里重放
+    if step <= int(store.counters().get("admin_totp_step", 0)):
+        return fail("totp_replay", "动态码已用过，等下一个再登录")
+    store.set_counter("admin_totp_step", step)
+    _fails.pop(ip or "-", None)
+    store.audit("admin", "auth.login", "admin", {"result": "ok", "ip": ip})
     return {"ok": True, "token": issue_session()}
 
 

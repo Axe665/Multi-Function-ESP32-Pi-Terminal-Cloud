@@ -58,6 +58,8 @@
 ```bash
 python3 -m pip install -r requirements.txt
 # 先起 Postgres 16 与 Redis 7（可以用 compose 只起这两个）
+# 它们现在都要口令：口令写在 docker/.env，原生模式也从环境变量读
+export CLOUD_DB_PASSWORD=… CLOUD_REDIS_PASSWORD=…   # 与 docker/.env 里的一致
 docker compose -f docker/compose.yml up -d postgres redis
 ./run.sh                       # 首次自动写入 3 个边 × 3 台设备 × 14 天演示数据
 # http://127.0.0.1:8002
@@ -83,7 +85,12 @@ python3 scripts/icons.py                 # 加了新图标才跑：重抽子集�
 整套（caddy + web + api + worker + postgres + redis + ollama）：
 
 ```bash
-cd docker && docker compose up -d --build
+cd docker
+# 先在 .env 里设两个必填口令（.env 已被 gitignore，只留本机）：
+#   CLOUD_DB_PASSWORD=…      CLOUD_REDIS_PASSWORD=…
+# 没配会被 compose 的 ${VAR:?} 直接拒绝启动；已有 pgdata 卷上换口令
+# 要先进库改角色：docker compose exec postgres psql -U cloud -c "ALTER USER cloud WITH PASSWORD '…'"
+docker compose up -d --build
 docker compose ps              # api / worker / postgres / redis 全部 healthy
 
 # 要跑本地模型时按卡型加一个覆盖文件（默认不起 ollama）
@@ -109,7 +116,12 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
   `CLOUD_DEMO_OPEN=1`，这一项只适合单人机器，不要带到生产。
 - **登录**：配好上面两项后，网页会先出现登录页，要口令 + authenticator 里的
   6 位码。TOTP 密钥就是 `CLOUD_ADMIN_TOTP` 的值（base32），输进 authenticator
-  时选「手动输入」，账号名随便写。会话是 HMAC 签名 cookie，浏览器关掉即失效。
+  时选「手动输入」，账号名随便写。会话是 HMAC 签名 cookie，浏览器关掉即失效；
+  经 Caddy 访问时按 `X-Forwarded-Proto` 加 `Secure`（容器里 scheme 恒为 http）。
+- **动态码只能用一次**：登录成功的时间步记进 `counters.admin_totp_step`，同一
+  30 秒窗口里再拿同一个码登录会被 401 挡掉（`auth.login` 审计里是 `totp_replay`）。
+- **失败锁定按来源 IP**：单 IP 10 分钟内错 5 次锁 10 分钟（回 429），另有一个
+  全站 50 次/10 分钟的兜底；换 IP 重试也照样受限。
 - **边上报告要身份**：走 8443 时，Caddy 把已验证客户端证书的 CN 传给 api，
   api 要求它与载荷里的 `edge_id` 一致；不经 mTLS 的路径要配 `CLOUD_EDGE_TOKEN`。
 - **443 只绑内网**：compose 用 `${CLOUD_LAN_IP}:443`，换网段要改 `.env` 里的
@@ -117,6 +129,13 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 - **备份加密要有密钥**：`docker/.secrets/backup.key`（0600）挂在 worker 里，
   路径由 `CLOUD_BACKUP_KEY_FILE` 指过去。缺了它每周加密副本会失败并写审计，
   `/health` 的 `backup.encrypt_fail` 会计数。
+- **加密副本不留明文**：gpg 加密后先解到 `/dev/null` 验一遍，确认能读才删掉
+  同目录的 `*.dump`；恢复演练优先用最新的 `.gpg`，先解密到临时文件再
+  `pg_restore`，用完连临时目录一起删。
+- **证书 SAN 跟着访问方式走**：`scripts/make_certs.py` 把 `CLOUD_DOMAIN` 与
+  `CLOUD_ID`、`CLOUD_LAN_IP`、`CLOUD_DNS`（后三个配了才加）一起写进 443 站点
+  证书的 SAN，内网 IP 用 IPAddress SAN。换网段或换内部 DNS 名要重签并重启
+  caddy，否则浏览器会报证书与地址不匹配。
 - **mDNS 由宿主发布**：容器里广播的是容器 IP，边发现不到。跑一次
   `./scripts/install_avahi.sh`（它会读 `CLOUD_ID`、`CLOUD_DOMAIN` 和 cloud-ca 指纹，
   写 `/etc/avahi/services/orpi-cloud.service`）。没装 Avahi 时静态地址兜底。
@@ -140,7 +159,7 @@ cd docker && docker compose up -d postgres
 ```
 边节点 ── POST /api/v1/ingest/edge-report ──▶ 云
               │  出现 user_id / subject / values 直接 422
-              │  telemetry_daily 里任何一行 k<5 整份拒收
+              │  telemetry_daily 里 k<5 的行按行丢弃（计数 + 审计）
               ▼
         telemetry_daily   日聚合，唯一事实来源
         advice            建议文本
@@ -160,10 +179,10 @@ cd docker && docker compose up -d postgres
 
 | 能力 | 说明 | 验证方式 |
 |---|---|---|
-| 摄取与幂等 | 原始字段 422、k<5 整份拒收、重复投递不写库 | `tests/test_ingest.py` |
-| 管理员登录 | 口令 + TOTP（RFC 6238）+ HMAC 会话 cookie | `tests/test_auth.py`，含 RFC 测试向量 |
-| AI 模式 B（默认） | 本地 Ollama，模型 `qwen3.5:9b`；不可用退回规则模板 | `tests/test_ai.py` |
-| AI 模式 A | 公有 API（`qwen3.5`），只发 k≥5 聚合，月度 token 预算熔断 | `tests/test_ai_public.py`，用本地假 API |
+| 摄取与幂等 | 原始字段 422、k<5 按行丢弃、重复投递不写库 | `tests/test_ingest.py` |
+| 管理员登录 | 口令 + TOTP（RFC 6238）+ HMAC 会话 cookie；同一时间步只成功一次 | `tests/test_auth.py`，含 RFC 测试向量 |
+| AI 模式 B（默认） | 本地 Ollama，模型 `qwen3.5:9b`；不可用或输出不合契约就退回规则模板 | `tests/test_ai.py` |
+| AI 模式 A | 公有 API（`qwen3.5`），只发 k≥5 聚合，月度 token 预算熔断；接口上的 `mode` 要 `CLOUD_ALLOW_MODE_SWITCH=1` 才切得动 | `tests/test_ai_public.py`，用本地假 API |
 | 报告缓存 | 同 scope + 周期 + 输入摘要 24 h 内复用 | `tests/test_ai.py` |
 | 词云 | jieba 分词 + 停用词 | `cloud/ai.py`、线上页面 |
 | 动态指标字典 | 标签/单位跟着上报走，不写死 | `/api/v1/meta` |
@@ -185,7 +204,10 @@ cd docker && docker compose up -d postgres
 - **公网边界有自检了**：`scripts/verify_exposure.sh` 拿 cloud-ca 签的边证书连 8443，逐条验证「两条路由通、其余 403、不带客户端证书连不上」，
   顺带反证 443 的内网管理 API 没被一起挡住。改 Caddyfile 之后跑一次就知道有没有多开。
 - **公网两条路由限速**：`ingest` 60 次/分、`health` 120 次/分，按客户端 IP，超了 429。
-- **管理员登录锁定**：10 分钟内错 5 次锁 10 分钟，锁定期间也回 429，写入 `auth.login` 审计。
+- **管理员登录锁定**：按来源 IP 记失败，10 分钟内错 5 次锁 10 分钟，锁定期间也回 429，写入 `auth.login` 审计；动态码一个时间步只成功一次。另有一个全站 50 次/10 分钟的兜底。
+- **群体分析默认关**：`privacy.group_analysis` 缺字段按「没同意」处理（边表默认 FALSE），演示数据在 `seed.py` 里显式打开并写 `consent.demo` 审计。
+- **原始字段上报会告警**：拒收的同时，`/overview` 的 `alerts` 里会出现一条 `kind=raw_payload` 的系统级告警（只看最近 24 小时，不另建表）。
+- **模式 A 不能从接口切**：`POST /ai/reports` 的 `mode` 只有 `rules` 随时可用，`local`/`api` 要部署方设 `CLOUD_ALLOW_MODE_SWITCH=1`，否则 400 说明理由。
 - **总览重做**：首屏 6 块图（带边名的全网拓扑、近 7 天完整率、各边每日入库、指标覆盖、边在线率、告警 Top5）+ 右栏待处理与摘要；拓扑可缩放、设备悬停出名字。
 - **报告列表去重**：同 `(scope, scope_id, 周期, 任务)` 只返回最新一份。
 - **演示心跳**：没有真实上报的边由 `jobs.demo_heartbeat()` 每 15 分钟补一条收件记录，只动 `last_seen` 与 `reports`。
@@ -226,7 +248,9 @@ cd docker && docker compose up -d postgres
 | 抑制计数（只有数量） | 被抑制的内容 |
 | 词频 | 设备序列号、地理位置 |
 
-`k < 5` 的行在端侧已经不产生，边也不会转发；云侧再校验一次，出现即整份拒收。
+`k < 5` 的行在端侧已经不产生，边也不会转发；云侧与边同一口径**按行丢弃**
+（计入 `suppressed_buckets` 并写 `ingest.suppressed` 审计），同批合格的桶照常入库。
+模型校验里的 k 门槛保留着，作为最后一道断言：真漏过来就是 422 并记 `ingest.invalid`。
 
 ## API
 
@@ -246,7 +270,7 @@ cd docker && docker compose up -d postgres
 ```
 
 这两条按客户端 IP 限速（收报 60 次/分、健康检查 120 次/分），超了回 429；
-管理员登录 10 分钟内错 5 次锁定 10 分钟，锁定期间同样回 429。
+管理员登录按来源 IP 记失败，10 分钟内错 5 次锁定 10 分钟，锁定期间同样回 429。
 
 告警相关：
 
@@ -270,9 +294,10 @@ cd docker && docker compose up -d postgres
 python3 -m unittest discover -s tests -t . -v
 ```
 
-**43 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis`、min/max 拒收）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、TOTP 与会话、
-公有 API 的成功/失败/超额三条路径、本地 Ollama 契约与不可达兜底、模型 digest 写入清单并复用、报告生成状态、显式 period、建议文本按不可信数据加分隔、
-告警按日聚合的合并与确认/静音/审计。
+**92 个用例**：摄取边界（含 `privacy.personalization` / `group_analysis` 默认关、min/max 拒收、k<5 按行丢弃、`edge_version`、原始字段告警）、多边与多设备对比、GPU 厂商识别、mDNS CA 指纹口径、审计口径、AI 契约与缓存、
+模型输出不合契约落模板、建议文本脱敏、TOTP 与会话（RFC 向量、同一时间步不可重放、按 IP 锁定、代理后 cookie 带 Secure）、
+公有 API 的成功/失败/超额三条路径与模式切换门禁、本地 Ollama 契约与不可达兜底、模型 digest 写入清单并复用、报告生成状态、显式 period、
+告警按日聚合的合并与确认/静音/审计、备份加密后不留明文与「只有 .gpg 也能恢复演练」、幂等收件箱清理写审计、演练/加密失败会重试。
 
 ## 基准脚本
 
@@ -296,7 +321,7 @@ DURATION_H=72 ./scripts/bench/bench_72h.sh   # 72 h 健康与内存 → docs/ben
 | §6.4 网站 | 五页、两级下钻、多边/多设备对比 | ✅ 五页齐全；报告列表带生成状态与 token；边与设备支持 `边 → 设备详情`；对比页可切「按边 / 按设备」，都按首日归一为 100；Vue3 + Vite + ECharts，自写 M3 token |
 | §6.5 API | ingest、overview、edges、devices、series、heatmap、wordcloud、ai/reports、privacy/audit | ✅ 全部实现；`POST /ai/reports` 支持 scope/period/mode/task，另加 meta/compare/daily/auth/alerts |
 | §6.6 成本控制 | 24 h 缓存、单次 ≤8k token、输出 ≤1k | ✅ 缓存按「输入摘要 + 任务」；输入超 8k 自动裁剪；`max_tokens=800` |
-| §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本；每月恢复演练（临时库导入 + 行数比对 + 记 RTO） |
+| §6.7 备份 | 每日 pg_dump 保留 14 天 | ✅ worker 每天 03:00 跑 `pg_dump`（自定义格式 + `pg_restore --list` 校验），保留 14 天；周日另做 gpg AES256 加密副本，验过能解密就删掉明文；每月恢复演练（用最新的 `.dump` 或 `.gpg`——后者先解到临时文件——临时库导入 + 行数比对 + 记 RTO），演练或加密失败隔天重试 |
 | §6.8 GPU 降级 | CUDA 不可用切规则模板 | ✅ `/health` 自检 NVIDIA（nvidia-smi/CUDA）与 AMD（rocm-smi/ROCm）；模型 digest 首次出现时记进 `data/model_manifest.json` 并用于比对；两者都没有时模型不可用 → 规则模板，不会留空报告 |
 
 ## 仍然没做的

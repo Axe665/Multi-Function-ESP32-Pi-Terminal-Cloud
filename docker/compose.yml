@@ -16,8 +16,8 @@ x-cloud: &cloud
     CLOUD_ID: ${CLOUD_ID:-cloud-home-01}
     CLOUD_NAME: ${CLOUD_NAME:-私有云 · 家庭实验室}
     CLOUD_DOMAIN: ${CLOUD_DOMAIN:-localhost}
-    CLOUD_PG_DSN: postgresql://cloud:${CLOUD_DB_PASSWORD:-cloud}@postgres:5432/cloud
-    CLOUD_REDIS_URL: redis://redis:6379/0
+    CLOUD_PG_DSN: postgresql://cloud:${CLOUD_DB_PASSWORD:?必须设置 CLOUD_DB_PASSWORD}@postgres:5432/cloud
+    CLOUD_REDIS_URL: redis://:${CLOUD_REDIS_PASSWORD:?必须设置 CLOUD_REDIS_PASSWORD}@redis:6379/0
     CLOUD_BACKUP_DIR: /backups
     CLOUD_EDGE_TOKEN: ${CLOUD_EDGE_TOKEN:-}
     CLOUD_ADMIN_TOKEN: ${CLOUD_ADMIN_TOKEN:-}
@@ -87,7 +87,10 @@ services:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     container_name: mt-cloud-api
-    command: ["python", "-m", "uvicorn", "cloud.main:app", "--host", "0.0.0.0", "--port", "8002"]
+    # api 端口没有发布到宿主，只有 Caddy 连得到，所以 X-Forwarded-* 可信：
+    # uvicorn 需要它才知道真实来源 IP 与协议（会话 cookie 的 Secure 也靠它）
+    command: ["python", "-m", "uvicorn", "cloud.main:app", "--host", "0.0.0.0",
+              "--port", "8002", "--forwarded-allow-ips=*"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,7 +136,8 @@ services:
     environment:
       POSTGRES_DB: cloud
       POSTGRES_USER: cloud
-      POSTGRES_PASSWORD: ${CLOUD_DB_PASSWORD:-cloud}
+      # 必填：没设置就拒绝启动，别用 cloud/cloud 默认口令
+      POSTGRES_PASSWORD: ${CLOUD_DB_PASSWORD:?必须设置 CLOUD_DB_PASSWORD}
     volumes:
       # 默认命名卷；跑过 scripts/setup_encrypted_volume.sh 后把 CLOUD_PGDATA 指到 LUKS 挂载点
       - ${CLOUD_PGDATA:-pgdata}:/var/lib/postgresql/data
@@ -153,7 +157,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
-    command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # 口令必填：以前 redis 完全无口令，同网段的任何容器都能直接读写队列与缓存
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb",
+              "--maxmemory-policy", "allkeys-lru", "--requirepass", "${CLOUD_REDIS_PASSWORD:?必须设置 CLOUD_REDIS_PASSWORD}"]
     volumes:
       - redisdata:/data
     deploy:
@@ -169,6 +175,9 @@ services:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: mt-ollama
     restart: unless-stopped
+    environment:
+      # 文档 §6.3：并发 1，避免几份报告同时挤显存
+      OLLAMA_NUM_PARALLEL: "1"
     volumes:
       - ollama_models:/root/.ollama
     deploy:
