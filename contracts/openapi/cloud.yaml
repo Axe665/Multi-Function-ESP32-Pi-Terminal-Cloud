@@ -1,137 +1,893 @@
 openapi: 3.1.0
 info:
   title: Modular Terminal Cloud API
+  description: 边节点查询与管理 API（文档 §6.5）。由实现导出，勿手改。
   version: 1.0.0
-  description: |
-    私有云 API。公网只应暴露 /ingest/edge-report 与 /health；
-    管理台与其余管理 API 仅内网可达（由 Caddy 控制）。
-servers:
-  - url: http://127.0.0.1:8002
 paths:
+  /api/v1/auth/state:
+    get:
+      summary: Auth State
+      operationId: auth_state_api_v1_auth_state_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Auth State Api V1 Auth State Get
+  /api/v1/auth/login:
+    post:
+      summary: Auth Login
+      operationId: auth_login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Auth Login Api V1 Auth Login Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      summary: Auth Logout
+      operationId: auth_logout_api_v1_auth_logout_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Auth Logout Api V1 Auth Logout Post
   /api/v1/ingest/edge-report:
     post:
-      summary: 边上报（幂等，按 edge_id + report_id）
-      description: |
-        载荷出现 user_id/subject/values 等原始字段时 422 并累加 raw_rejected；
-        telemetry_daily 里任何一行 k<5 时整份拒收（模型层校验）。
+      summary: Ingest
+      operationId: ingest_api_v1_ingest_edge_report_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: './vendor/edge/edge-report@v1.json'
+              type: object
+              additionalProperties: true
+              title: Body
       responses:
         '200':
-          description: 已接受或已存在
+          description: Successful Response
           content:
             application/json:
               schema:
                 type: object
-                properties:
-                  accepted: { type: boolean }
-                  duplicate: { type: boolean }
-                  report_id: { type: string }
-                  rows: { type: integer }
+                additionalProperties: true
+                title: Response Ingest Api V1 Ingest Edge Report Post
         '422':
-          description: 原始字段或 schema 不合规
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/meta:
     get:
-      summary: 指标字典、AI 模式、k 门槛
+      summary: Meta
+      description: 指标字典来自已入库的数据：换了模块，下拉框自动多一项。
+      operationId: meta_api_v1_meta_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       responses:
-        '200': { description: 元信息 }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Meta Api V1 Meta Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/overview:
     get:
-      summary: 总览（在线数、完整率、告警 Top5、最新 AI 报告）
-      responses:
-        '200': { description: 总览对象 }
-  /api/v1/edges:
-    get:
-      summary: 边列表（含设备、有数据天数、k 最小值）
-      responses:
-        '200': { description: 边数组 }
-  /api/v1/devices:
-    get:
-      summary: 设备列表
+      summary: Overview
+      operationId: overview_api_v1_overview_get
       parameters:
-        - { name: edge, in: query, schema: { type: string } }
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       responses:
-        '200': { description: 设备数组 }
-  /api/v1/series:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Overview Api V1 Overview Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/alerts:
     get:
-      summary: 日聚合序列
+      summary: Alerts
+      operationId: alerts_api_v1_alerts_get
       parameters:
-        - { name: metric, in: query, required: true, schema: { type: string } }
-        - { name: edge, in: query, schema: { type: string } }
-        - { name: device, in: query, schema: { type: string } }
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 90
+          minimum: 1
+          default: 30
+          title: Days
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          default: open
+          title: State
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       responses:
-        '200': { description: points[{day,mean,z,k}] }
-  /api/v1/compare:
-    get:
-      summary: 多边同指标对比（首日 = 100 的指数）
-      parameters:
-        - { name: metric, in: query, required: true, schema: { type: string } }
-      responses:
-        '200': { description: edges[{edge_id,name,points,k_min}] }
-  /api/v1/heatmap:
-    get:
-      summary: 单设备日聚合矩阵
-      responses:
-        '200': { description: cells[{day,mean,z}] }
-  /api/v1/wordcloud:
-    get:
-      summary: 词频
-      responses:
-        '200': { description: words[{word,count}] }
-  /api/v1/advice:
-    get:
-      summary: 建议流
-      parameters:
-        - { name: edge, in: query, schema: { type: string } }
-        - { name: risk, in: query, schema: { enum: [info, watch, alert] } }
-      responses:
-        '200': { description: 建议数组 }
-  /api/v1/daily:
-    get:
-      summary: 日聚合明细
-      parameters:
-        - { name: edge, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, default: 40 } }
-      responses:
-        '200': { description: 行数组 }
-  /api/v1/ai/reports:
-    get:
-      summary: 报告列表
-      responses:
-        '200': { description: 报告数组 }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Alerts Api V1 Alerts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/alerts/ack:
     post:
-      summary: 生成报告（同 scope/period/输入 24 h 内复用）
+      summary: Ack Alert
+      operationId: ack_alert_api_v1_alerts_ack_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
-              required: [scope]
-              properties:
-                scope: { enum: [fleet, edge, device] }
-                scope_id: { type: string }
-                mode: { enum: [local, api, rules] }
+              additionalProperties: true
+              title: Body
       responses:
-        '200': { description: '{id, model, content}' }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Ack Alert Api V1 Alerts Ack Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/alerts/mute:
+    post:
+      summary: Mute Alert
+      operationId: mute_alert_api_v1_alerts_mute_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Mute Alert Api V1 Alerts Mute Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/alerts/unmute:
+    post:
+      summary: Unmute Alert
+      operationId: unmute_alert_api_v1_alerts_unmute_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Unmute Alert Api V1 Alerts Unmute Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/edges:
+    get:
+      summary: Edges
+      operationId: edges_api_v1_edges_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Edges Api V1 Edges Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/devices:
+    get:
+      summary: Devices
+      operationId: devices_api_v1_devices_get
+      parameters:
+      - name: edge
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edge
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Devices Api V1 Devices Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/series:
+    get:
+      summary: Series
+      operationId: series_api_v1_series_get
+      parameters:
+      - name: metric
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Metric
+      - name: edge
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edge
+      - name: device
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Device
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Series Api V1 Series Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/heatmap:
+    get:
+      summary: Heatmap
+      operationId: heatmap_api_v1_heatmap_get
+      parameters:
+      - name: edge
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Edge
+      - name: device
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Device
+      - name: metric
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Metric
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Heatmap Api V1 Heatmap Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/wordcloud:
+    get:
+      summary: Wordcloud
+      operationId: wordcloud_api_v1_wordcloud_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 30
+          minimum: 1
+          default: 7
+          title: Days
+      - name: scope
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scope
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Wordcloud Api V1 Wordcloud Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/advice:
+    get:
+      summary: Advice
+      operationId: advice_api_v1_advice_get
+      parameters:
+      - name: edge
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edge
+      - name: risk
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Risk
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 40
+          title: Limit
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Advice Api V1 Advice Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/daily/counts:
+    get:
+      summary: Daily Counts
+      operationId: daily_counts_api_v1_daily_counts_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 30
+          minimum: 1
+          default: 7
+          title: Days
+      - name: edge
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edge
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Daily Counts Api V1 Daily Counts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/daily:
+    get:
+      summary: Daily
+      operationId: daily_api_v1_daily_get
+      parameters:
+      - name: edge
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Edge
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 40
+          title: Limit
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Daily Api V1 Daily Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/compare:
+    get:
+      summary: Compare
+      description: 同一指标横向对比：多边或多设备，都以首日为 100。
+      operationId: compare_api_v1_compare_get
+      parameters:
+      - name: metric
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Metric
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(edges|devices)$
+          default: edges
+          title: Scope
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Compare Api V1 Compare Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/ai/reports:
+    get:
+      summary: Ai Reports
+      operationId: ai_reports_api_v1_ai_reports_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Limit
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Ai Reports Api V1 Ai Reports Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      summary: Ai Generate
+      operationId: ai_generate_api_v1_ai_reports_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Ai Generate Api V1 Ai Reports Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/ai/reports/{report_id}:
     get:
-      summary: 报告内容与 token 消耗
+      summary: Ai Report
+      operationId: ai_report_api_v1_ai_reports__report_id__get
       parameters:
-        - { name: report_id, in: path, required: true, schema: { type: integer } }
+      - name: report_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Report Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       responses:
-        '200': { description: 报告 }
-        '404': { description: 不存在 }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Ai Report Api V1 Ai Reports  Report Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/privacy/audit:
     get:
-      summary: k 分布、抑制计数、原始字段拦截、审计日志
+      summary: Privacy Audit
+      operationId: privacy_audit_api_v1_privacy_audit_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
       responses:
-        '200': { description: 审计对象 }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Privacy Audit Api V1 Privacy Audit Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/health:
     get:
-      summary: 自检
+      summary: Health
+      operationId: health_api_v1_health_get
       responses:
-        '200': { description: 数据库、鉴权、AI 模式 }
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Health Api V1 Health Get
+components:
+  schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

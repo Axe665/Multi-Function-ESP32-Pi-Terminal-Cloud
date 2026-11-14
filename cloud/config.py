@@ -49,7 +49,8 @@ CA_CERT = Path(_env("CLOUD_CA_CERT", "/certs/cloud-ca.crt"))
 # 模式 B（默认）：本地 Ollama；模式 A：公有 API，默认关。
 AI_MODE = _env("CLOUD_AI_MODE", "local")
 OLLAMA_URL = _env("CLOUD_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = _env("CLOUD_OLLAMA_MODEL", "qwen3.5")
+# 文档 §6.1/§6.3 定的是 Qwen3.5-9B q4；compose 也默认 qwen3.5:9b，这里别再留裸名字
+OLLAMA_MODEL = _env("CLOUD_OLLAMA_MODEL", "qwen3.5:9b")
 # 可选：模型文件的 SHA256 清单值（ollama /api/tags 里的 digest），配了就自检
 OLLAMA_SHA256 = _env("CLOUD_OLLAMA_SHA256")
 # 没配上面的值时，把首次看到的模型 digest 记到这里（文档 §6.8）
