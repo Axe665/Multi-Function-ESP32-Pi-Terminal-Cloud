@@ -12,10 +12,18 @@ compose_file = "docker/compose.yml"
 # 原生模式只起 api 和 worker，Postgres 和 Redis 还是要容器（缺了页面会提示，可一键补）
 [native]
 service = "cloud-run"
-label = "原生进程 run.sh"
+label = "原生 API run.sh"
 script = "run.sh"
 ports = [8002]
+# 原生模式直接连 api，不经 caddy，健康探测也得跟着换
 deps = ["postgres", "redis"]
+health_url = "http://127.0.0.1:8002/api/v1/health"
+
+# run.sh 的默认值会把演示数据写进库（seed 先 DELETE 全部业务表），
+# 而 worker 会和 compose 里的那份各跑一遍定时任务。两个都关掉。
+[native.env]
+CLOUD_AUTOSEED = "0"
+CLOUD_WORKER = "0"
 
 [services.caddy]
 label = "入口网关"
