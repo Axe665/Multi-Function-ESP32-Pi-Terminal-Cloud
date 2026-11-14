@@ -115,6 +115,9 @@ services:
     image: postgres:16-alpine
     container_name: mt-cloud-db
     restart: unless-stopped
+    ports:
+      # 只给宿主机上的原生模式用（run.sh 默认连 127.0.0.1:5432），不对外
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: cloud
       POSTGRES_USER: cloud
@@ -136,6 +139,8 @@ services:
     image: redis:7-alpine
     container_name: mt-cloud-redis
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
     command: ["redis-server", "--save", "60", "1", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redisdata:/data
