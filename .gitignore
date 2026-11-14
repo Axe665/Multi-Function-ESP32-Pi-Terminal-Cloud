@@ -11,3 +11,6 @@ web/node_modules/
 web/dist/
 node_modules/
 backups/
+
+# 服务控制台：进程号、日志、控制台自己的输出
+.run/

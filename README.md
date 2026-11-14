@@ -63,6 +63,12 @@ docker compose -f docker/compose.yml up -d postgres redis
 # http://127.0.0.1:8002
 ```
 
+服务控制台（启停、健康检查、日志，云 8102）：
+
+```bash
+./tools/service-launch/launch.sh
+```
+
 前端（Vue 3 + Vite + ECharts，手写 Material 3 token）：
 
 ```bash
