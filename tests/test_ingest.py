@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 _TMP = tempfile.mkdtemp(prefix="cloud-test-")
 os.environ.setdefault("CLOUD_DATA_DIR", _TMP)
 os.environ.setdefault("CLOUD_AI_MODE", "rules")
+os.environ.setdefault("CLOUD_SEED_FORCE", "1")  # 用例会重写演示库
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -89,7 +90,7 @@ class IngestTest(unittest.TestCase):
         r = self.client.post("/api/v1/ingest/edge-report", json=payload)
         self.assertEqual(r.status_code, 422)
         self.assertEqual(r.json()["detail"]["code"], "RAW_PAYLOAD_REJECTED")
-        self.assertGreaterEqual(store.counters().get("raw_rejected", 0), 1)
+        self.assertGreaterEqual(store.counters().get("raw_rejected_local", 0), 1)
 
     def test_min_max_rejected(self):
         # 文档 §8.2：出端前必须去掉 min/max

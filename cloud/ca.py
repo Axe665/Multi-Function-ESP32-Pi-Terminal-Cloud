@@ -100,6 +100,8 @@ def write_bundle(out: Path, ca: dict[str, str], server: dict[str, str],
     (out / "cloud.key").write_text(server["key_pem"])
     (out / "edge.crt").write_text(client["cert_pem"])
     (out / "edge.key").write_text(client["key_pem"])
-    # 容器里的 Caddy 以非 root 用户跑，读不到 0600 的文件；目录本身也不进仓库
-    for f in ("cloud-ca.key", "cloud.key", "edge.key"):
-        (out / f).chmod(0o644)
+    # 容器里的 Caddy 以非 root 用户跑，站点证书私钥保留可读；
+    # CA 签名密钥与边客户端密钥 Caddy 用不到，收紧到 0600
+    (out / "cloud.key").chmod(0o644)
+    (out / "cloud-ca.key").chmod(0o600)
+    (out / "edge.key").chmod(0o600)

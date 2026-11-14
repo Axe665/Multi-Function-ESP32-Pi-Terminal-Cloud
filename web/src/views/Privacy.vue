@@ -17,8 +17,8 @@ const flowOption = computed(() => {
   const a = audit.value || {}
   const rows = [
     { label: '入库', n: a.rows_ingested || 0, color: t.line },
-    { label: '被抑制', n: a.suppressed_buckets || 0, color: t.notice },
-    { label: '原始字段拦截', n: a.raw_rejected || 0, color: t.critical },
+    { label: '被抑制（边自报）', n: a.reported_suppressed || 0, color: t.notice },
+    { label: '云侧拦截', n: a.raw_rejected_local || 0, color: t.critical },
   ]
   return {
     grid: { left: 4, right: 44, top: 26, bottom: 4, containLabel: true },
@@ -46,10 +46,11 @@ const kpis = computed(() => {
   const a = audit.value || {}
   return [
     { label: '观测到的最小 k', value: a.k_min_seen ?? '—', note: `门槛 ${a.k_min ?? 5}` },
-    { label: '被抑制的桶', value: fmtNum(a.suppressed_buckets ?? 0, 0), note: 'k<5，从未离开端' },
-    { label: '原始字段拦截', value: a.raw_rejected ?? 0, note: '摄取时直接 422' },
+    { label: '被抑制的桶', value: fmtNum(a.reported_suppressed ?? 0, 0), note: '边自报，k<5 未离开端' },
+    { label: '云侧拦截', value: a.raw_rejected_local ?? 0, note: '云端实际 422 的次数' },
+    { label: '边自报拦截', value: a.reported_raw_rejected ?? 0, note: '边自己统计，未独立核实' },
     { label: '已入库行', value: fmtNum(a.rows_ingested ?? 0, 0), note: '全部是日聚合' },
-    { label: '导出记录', value: a.exports?.length || 0, note: '每次导出都写审计' },
+    { label: '报告生成记录', value: a.exports?.length || 0, note: '云端不提供导出接口' },
   ]
 })
 
@@ -57,7 +58,7 @@ const kRows = computed(() => {
   const dist = audit.value?.k_distribution || {}
   const max = Math.max(1, ...Object.values(dist))
   return Object.entries(dist).map(([label, n]) => ({
-    label: label === '5' ? 'k = 5' : `k = ${label}`,
+    label: label === '5' ? 'k = 5' : label.startsWith('<') ? `k ${label}` : `k = ${label}`,
     n,
     pct: Math.round((n / max) * 100),
   }))

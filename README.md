@@ -107,8 +107,16 @@ export CLOUD_ADMIN_TOTP='用 python3 -c "from cloud import auth;print(auth.secre
 - **管理接口默认拒绝**：没配 `CLOUD_ADMIN_PASSWORD` + `CLOUD_ADMIN_TOTP` 时，所有
   `/api/v1/*`（除 `health` 与 `ingest`）返回 403。本机演示要显式设
   `CLOUD_DEMO_OPEN=1`，这一项只适合单人机器，不要带到生产。
+- **登录**：配好上面两项后，网页会先出现登录页，要口令 + authenticator 里的
+  6 位码。TOTP 密钥就是 `CLOUD_ADMIN_TOTP` 的值（base32），输进 authenticator
+  时选「手动输入」，账号名随便写。会话是 HMAC 签名 cookie，浏览器关掉即失效。
 - **边上报告要身份**：走 8443 时，Caddy 把已验证客户端证书的 CN 传给 api，
   api 要求它与载荷里的 `edge_id` 一致；不经 mTLS 的路径要配 `CLOUD_EDGE_TOKEN`。
+- **443 只绑内网**：compose 用 `${CLOUD_LAN_IP}:443`，换网段要改 `.env` 里的
+  `CLOUD_LAN_IP`。换不了的机器留空就退回 `0.0.0.0`，此时务必确认没有端口转发。
+- **备份加密要有密钥**：`docker/.secrets/backup.key`（0600）挂在 worker 里，
+  路径由 `CLOUD_BACKUP_KEY_FILE` 指过去。缺了它每周加密副本会失败并写审计，
+  `/health` 的 `backup.encrypt_fail` 会计数。
 - **备份不许进仓库**：`backups/` 是 gitignore 的，CI 也会拦 `*.dump`/`*.gpg`/`*.bak`。
   历史里曾经提交过一批明文 dump，已经从当前树移除；旧提交里仍能翻到，彻底清理要重写历史。
 - **443 不代理 Ollama**：`/ollama/*` 只在 `127.0.0.1:8088` 上可用，443 明确 403。

@@ -32,17 +32,20 @@ def _scheduler_loop() -> None:
                 jobs.maybe_daily_report(); last["report"] = now
             if now - last["prune"] > 6 * 3600:
                 jobs.prune(); last["prune"] = now
-            # 每天 03:00 一次全量备份（重启后当天已备份过就不再补）
+            # 每天 03:00 一次全量备份。判据用审计表，不用「距上次 20 小时」：
+            # 后者会让时刻每天往后漂（03:00 → 23:00 → 19:00 …）
             today = dt.date.today()
             at_three = dt.datetime.combine(today, dt.time(3, 0)).timestamp()
-            if now >= at_three and now - last["backup"] > 20 * 3600:
-                out = jobs.run_backup()
-                # 文档 §6.7：每周再做一份加密离线副本；每月做一次恢复演练
-                if today.weekday() == 6:
-                    jobs._encrypt(config.BACKUP_DIR / out["file"]) if out.get("ok") else None
-                last["backup"] = now
-            if today.day == 1 and now - last["drill"] > 24 * 3600:
-                jobs.run_restore_drill(); last["drill"] = now
+            if now >= at_three:
+                if not store.audit_since("backup.done", int(at_three * 1000)):
+                    jobs.run_backup()
+                # 文档 §6.7：每周一份加密离线副本。当天没加密成功就隔天再试，
+                # 别等下一个周日
+                if today.weekday() == 6 and not _encrypted_today(at_three):
+                    _encrypt_latest()
+            month_start = dt.datetime.combine(today.replace(day=1), dt.time(0, 0)).timestamp()
+            if today.day == 1 and not _drilled(month_start):
+                jobs.run_restore_drill()
         except Exception as e:  # noqa: BLE001 —— 排期线程不能死
             store.audit("system", "worker.schedule_error", "cloud", {"error": str(e)[:200]})
         time.sleep(60)
@@ -60,3 +63,22 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _encrypted_today(at_three: float) -> bool:
+    """今天已经加密成功（或已经失败过一次，避免每分钟重试）。"""
+    since = int(at_three * 1000)
+    return (store.audit_since("backup.encrypt", since)
+            or store.audit_since("backup.encrypt_fail", since))
+
+
+def _encrypt_latest() -> None:
+    dumps = sorted(config.BACKUP_DIR.glob("cloud-*.dump"), key=lambda f: f.stat().st_mtime)
+    if dumps:
+        jobs._encrypt(dumps[-1])
+
+
+def _drilled(month_start: float) -> bool:
+    """本月演练过（成功或失败）。失败时第二天会再试。"""
+    since = int(month_start * 1000)
+    return store.audit_since("backup.drill", since) or store.audit_since("backup.drill_fail", since)

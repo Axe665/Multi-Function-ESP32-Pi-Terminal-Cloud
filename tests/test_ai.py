@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 _TMP = tempfile.mkdtemp(prefix="cloud-ai-")
 os.environ.setdefault("CLOUD_DATA_DIR", _TMP)
 os.environ.setdefault("CLOUD_AI_MODE", "rules")
+os.environ.setdefault("CLOUD_SEED_FORCE", "1")  # 用例会重写演示库
 
 from tests.support import ensure_pg  # noqa: E402
 

@@ -26,8 +26,7 @@ def generate_report(scope: str, scope_id: str | None = None,
                     period: list[str] | None = None) -> dict[str, Any]:
     from . import ai, store as _store
     rng = (period[0], period[1]) if period else None
-    out = ai.generate(scope, scope_id, force_rules=(mode or config.AI_MODE) == "rules",
-                      task=task, period=rng)
+    out = ai.generate(scope, scope_id, task=task, period=rng, mode=mode)
     _store.audit("admin", "export.report", f"report:{out['id']}",
                  {"model": out["model"], "scope": scope})
     return out
@@ -66,8 +65,22 @@ def refresh_rollup() -> dict[str, Any]:
     return {"edges": len(out), "metrics": sum(len(v) for v in out.values())}
 
 
+def _snapshot_meta(dsn: str) -> dict[str, Any]:
+    """备份时点的事实：行数与最新日期。恢复演练拿它当基准，不拿现在的库比。"""
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        counts = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+                  for t in ("edges", "devices", "telemetry_daily")}
+        latest = conn.execute("SELECT MAX(day) AS d FROM telemetry_daily").fetchone()["d"]
+    return {"counts": counts, "latest_day": str(latest) if latest else None,
+            "taken_at": store.now_ms()}
+
+
 def run_backup() -> dict[str, Any]:
-    """pg_dump 自定义格式，落 BACKUP_DIR，保留 14 天。"""
+    """pg_dump 自定义格式，落 BACKUP_DIR，保留 14 天。
+
+    写完先用 pg_restore --list 验一遍（半截文件不能进保留集），再记一份 meta，
+    恢复演练按这份 meta 比。
+    """
     config.ensure_dirs()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = config.BACKUP_DIR / f"cloud-{stamp}.dump"
@@ -76,17 +89,36 @@ def run_backup() -> dict[str, Any]:
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if res.returncode != 0:
         store.audit("system", "backup.fail", "cloud", {"error": res.stderr[-300:]})
+        store.bump("backup_fail")
         return {"ok": False, "error": res.stderr[-300:]}
-    # 保留 14 天
+
+    check = subprocess.run(["pg_restore", "--list", str(target)],
+                           capture_output=True, text=True, timeout=300)
+    if check.returncode != 0:
+        store.audit("system", "backup.corrupt", "cloud",
+                    {"file": target.name, "error": check.stderr[-300:]})
+        store.bump("backup_fail")
+        target.unlink(missing_ok=True)
+        return {"ok": False, "error": "dump 读不出来，已删除"}
+
+    meta = _snapshot_meta(config.PG_DSN)
+    (config.BACKUP_DIR / f"{target.name}.meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+    # 保留 14 天（dump、加密副本、meta 一起清）
     cutoff = time.time() - 14 * 86400
     removed = 0
-    for f in config.BACKUP_DIR.glob("cloud-*.dump"):
+    for f in config.BACKUP_DIR.glob("cloud-*"):
+        if f.suffix not in (".dump", ".gpg", ".json"):
+            continue
         if f.stat().st_mtime < cutoff:
             f.unlink(missing_ok=True)
             removed += 1
     size = target.stat().st_size
     store.audit("system", "backup.done", "cloud",
-                {"file": target.name, "bytes": size, "pruned": removed})
+                {"file": target.name, "bytes": size, "pruned": removed,
+                 "rows": meta["counts"], "latest_day": meta["latest_day"]})
+    store.bump("backup_ok")
     return {"ok": True, "file": target.name, "bytes": size, "pruned": removed}
 
 
@@ -94,6 +126,10 @@ def _encrypt(path) -> dict[str, Any]:
     """每周的离线副本加密（age 不在镜像里，用 gpg 对称加密）。"""
     key_file = config.BACKUP_KEY_FILE
     if not key_file:
+        # 缺 key 时以前只是返回 False，调用方又把返回值丢了，等于悄悄没加密
+        store.audit("system", "backup.encrypt_fail", "cloud",
+                    {"file": path.name, "reason": "没有配置 CLOUD_BACKUP_KEY_FILE"})
+        store.bump("backup_encrypt_fail")
         return {"ok": False, "error": "没有配置 CLOUD_BACKUP_KEY_FILE"}
     target = path.with_suffix(path.suffix + ".gpg")
     # worker 以非 root 跑，HOME 不可写；给 gpg 一个临时 homedir
@@ -104,16 +140,29 @@ def _encrypt(path) -> dict[str, Any]:
         capture_output=True, text=True, timeout=600)
     shutil.rmtree(home, ignore_errors=True)
     if res.returncode != 0:
+        store.audit("system", "backup.encrypt_fail", "cloud",
+                    {"file": path.name, "error": res.stderr[-200:]})
+        store.bump("backup_encrypt_fail")
         return {"ok": False, "error": res.stderr[-200:]}
+    store.audit("system", "backup.encrypt", "cloud",
+                {"file": target.name, "bytes": target.stat().st_size})
     return {"ok": True, "file": target.name, "bytes": target.stat().st_size}
 
 
+def _drill_fail(reason: str, **extra: Any) -> dict[str, Any]:
+    store.audit("system", "backup.drill_fail", "cloud", {"error": reason, **extra})
+    store.bump("backup_drill_fail")
+    return {"ok": False, "error": reason, **extra}
+
+
 def run_restore_drill() -> dict[str, Any]:
-    """每月一次的恢复演练：新库导入最新 dump，校验行数与最新日期，然后删掉。"""
+    """每月一次的恢复演练：新库导入最新 dump，与备份时点的 meta 对账，然后删掉。"""
     dumps = sorted(config.BACKUP_DIR.glob("cloud-*.dump"), key=lambda f: f.stat().st_mtime)
     if not dumps:
-        return {"ok": False, "error": "没有可用的备份文件"}
+        return _drill_fail("没有可用的备份文件")
     newest = dumps[-1]
+    meta_file = config.BACKUP_DIR / f"{newest.name}.meta.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else None
     started = time.time()
     name = f"cloud_drill_{time.strftime('%Y%m%d%H%M%S')}"
     admin = psycopg.conninfo.make_conninfo(config.PG_DSN)
@@ -124,23 +173,31 @@ def run_restore_drill() -> dict[str, Any]:
         res = subprocess.run(["pg_restore", "--no-owner", "--no-acl", "--dbname", drill_dsn, str(newest)],
                              capture_output=True, text=True, timeout=1800)
         # 客户端版本比服务端新时会带一句 SET transaction_timeout，服务端拒绝但数据照常恢复；
-        # 真正的判定是行数与最新日期能不能对上，不是 pg_restore 的退出码。
+        # 真正的判定是 meta 对不对得上，不是 pg_restore 的退出码。
         if res.returncode not in (0, 1):
-            return {"ok": False, "error": (res.stderr or res.stdout)[-300:]}
+            return _drill_fail("pg_restore 失败", detail=(res.stderr or res.stdout)[-300:])
         with psycopg.connect(drill_dsn, row_factory=dict_row) as conn:
             counts = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
                       for t in ("edges", "devices", "telemetry_daily")}
             latest = conn.execute("SELECT MAX(day) AS d FROM telemetry_daily").fetchone()["d"]
-        with psycopg.connect(config.PG_DSN, row_factory=dict_row) as conn:
-            source = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
-                      for t in ("edges", "devices", "telemetry_daily")}
-        missing = {t: (source[t], counts[t]) for t in counts if counts[t] < source[t]}
-        if missing:
-            return {"ok": False, "error": f"恢复后行数不足：{missing}", "counts": counts}
+
+        if meta:
+            short = {t: (meta["counts"][t], counts[t]) for t in counts
+                     if counts[t] < meta["counts"][t]}
+            if short:
+                return _drill_fail("恢复后行数少于备份时点", detail=short)
+            if meta.get("latest_day") and str(latest) != meta["latest_day"]:
+                return _drill_fail("最新日期与备份时点不一致",
+                                   detail={"meta": meta["latest_day"], "restored": str(latest)})
+        # 老备份没有 meta：至少要能读出数据
+        elif not counts["edges"] or latest is None:
+            return _drill_fail("备份里没有数据", detail=counts)
+
         took = round(time.time() - started, 1)
         store.audit("system", "backup.drill", "cloud",
-                    {"file": newest.name, "counts": counts,
+                    {"file": newest.name, "counts": counts, "meta": meta,
                      "latest_day": str(latest), "rto_s": took})
+        store.bump("backup_drill_ok")
         return {"ok": True, "file": newest.name, "counts": counts,
                 "latest_day": str(latest), "rto_s": took}
     finally:
@@ -160,8 +217,9 @@ def demo_heartbeat() -> dict[str, int]:
     cutoff = now - 90 * 60_000
     beats = 0
     with store.connect() as conn:
+        # 只补给演示边：以前连真实边一起刷，掉线告警就永远触发不了
         stale = [r["edge_id"] for r in conn.execute(
-            "SELECT edge_id FROM edges WHERE last_seen < %s", (cutoff,))]
+            "SELECT edge_id FROM edges WHERE is_demo AND last_seen < %s", (cutoff,))]
         for edge_id in stale:
             conn.execute("UPDATE edges SET last_seen=%s WHERE edge_id=%s", (now, edge_id))
             conn.execute("UPDATE devices SET last_seen=%s WHERE edge_id=%s", (now, edge_id))
@@ -188,10 +246,14 @@ def prune(retention_days: int | None = None) -> dict[str, int]:
         adv = conn.execute("DELETE FROM advice WHERE created_at < %s", (text_cutoff,)).rowcount
         words = conn.execute("DELETE FROM word_freq WHERE day < %s", (text_day,)).rowcount
         reports = conn.execute("DELETE FROM reports WHERE received_at < %s", (cutoff,)).rowcount
-    if daily or adv or words:
+        # AI 报告属于 L3，文档 §8.1 写的是保留 1 年；以前这条表从来不删
+        ai_reports = conn.execute(
+            "DELETE FROM ai_reports WHERE created_at < %s", (text_cutoff,)).rowcount
+    if daily or adv or words or ai_reports:
         store.audit("system", "retention.prune", "cloud",
-                    {"daily": daily, "advice": adv, "words": words})
-    return {"daily": daily, "advice": adv, "words": words, "reports": reports}
+                    {"daily": daily, "advice": adv, "words": words, "ai_reports": ai_reports})
+    return {"daily": daily, "advice": adv, "words": words, "reports": reports,
+            "ai_reports": ai_reports}
 
 
 def maybe_daily_report() -> dict[str, Any] | None:

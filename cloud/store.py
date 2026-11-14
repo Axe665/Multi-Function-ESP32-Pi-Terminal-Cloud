@@ -25,10 +25,13 @@ CREATE TABLE IF NOT EXISTS edges (
   cert_fp   TEXT,
   last_seen BIGINT,      -- 毫秒时间戳，INTEGER 装不下（文档写的是 INTEGER，这里是必要的修正）
   version   TEXT,
-  group_analysis BOOLEAN NOT NULL DEFAULT TRUE
+  group_analysis BOOLEAN NOT NULL DEFAULT TRUE,
+  is_demo   BOOLEAN NOT NULL DEFAULT FALSE
 );
 -- 老库补列：群体分析开关随 edge-report 一起上报（文档 §8.5）
 ALTER TABLE edges ADD COLUMN IF NOT EXISTS group_analysis BOOLEAN NOT NULL DEFAULT TRUE;
+-- 演示边单独标记：心跳只补给它们，别把真实边的 last_seen 一起刷新
+ALTER TABLE edges ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS devices (
   device_id    TEXT PRIMARY KEY,
@@ -189,6 +192,13 @@ def bump(key: str, n: int = 1) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = counters.value + EXCLUDED.value", (key, n))
 
 
+def set_counter(key: str, value: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO counters(key, value) VALUES(%s,%s) "
+            "ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value", (key, int(value)))
+
+
 def counters() -> dict[str, int]:
     with connect() as conn:
         return {r["key"]: r["value"] for r in conn.execute("SELECT * FROM counters")}
@@ -200,6 +210,20 @@ def audit(actor: str, action: str, target: str, detail: dict[str, Any] | None = 
             "INSERT INTO audit(actor, action, target, detail, created_at) VALUES(%s,%s,%s,%s,%s)",
             (actor, action, target, json.dumps(detail or {}, ensure_ascii=False, default=str),
              _ms(now_ms())))
+
+
+def audit_since(action: str, since_ms: int) -> bool:
+    """since_ms 之后有没有这条审计。排期用它判断「今天做过了没」。"""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM audit WHERE action=%s AND created_at >= %s LIMIT 1",
+            (action, _ms(since_ms))).fetchone()
+    return row is not None
+
+
+def table_counts(tables: tuple[str, ...] = ("edges", "devices", "telemetry_daily", "advice")) -> dict[str, int]:
+    with connect() as conn:
+        return {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"] for t in tables}
 
 
 def ingest_report(payload: dict[str, Any]) -> dict[str, Any]:
