@@ -1,0 +1,46 @@
+# 服务控制台的配置。服务清单来自 docker compose，这里只补界面要显示的中文名和端口说明。
+# 改了 compose 不用动这个文件；改了端口说明记得对一下。
+
+[console]
+title = "云控制台"
+port = 8102
+web_url = "http://127.0.0.1:8088/"
+health_url = "http://127.0.0.1:8088/api/v1/health"
+compose_file = "docker/compose.yml"
+
+# 不用 docker 时的原生跑法：控制台自己拉起这个脚本，PID 和日志写在 .run/ 下
+# 原生模式只起 api 和 worker，Postgres 和 Redis 还是要容器（缺了页面会提示，可一键补）
+[native]
+service = "cloud-run"
+label = "原生进程 run.sh"
+script = "run.sh"
+ports = [8002]
+deps = ["postgres", "redis"]
+
+[services.caddy]
+label = "入口网关"
+note = "443 管理台，8443 边上报，8088 本机明文"
+
+[services.web]
+label = "网页与入口"
+note = "只在 compose 网络内，对外走 caddy"
+
+[services.api]
+label = "管理 API"
+note = "查询、摄取、报告"
+
+[services.worker]
+label = "后台任务"
+note = "AI 报告与定时任务"
+
+[services.postgres]
+label = "数据库"
+note = "5432，只在 compose 网络内"
+
+[services.redis]
+label = "缓存与队列"
+note = "6379，只在 compose 网络内"
+
+[services.ollama]
+label = "本地模型"
+note = "ai profile，默认不起"

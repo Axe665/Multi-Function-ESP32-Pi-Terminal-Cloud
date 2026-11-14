@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=云控制台
+Comment=云服务启停、健康检查与日志
+Exec=bash @ROOT@/tools/service-launch/launch.sh
+Terminal=false
+Categories=Utility;Network;
